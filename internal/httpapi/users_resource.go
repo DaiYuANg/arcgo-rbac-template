@@ -47,8 +47,8 @@ type usersListInput struct {
 
 func (e *UsersResource) Register(registrar httpx.Registrar) {
 	g := registrar.Scope()
+	httpx.MustGroupGet(g, "", e.ListOrGetMany)
 	httpx.MustAuto(g,
-		httpx.Auto(e.ListOrGetMany),
 		httpx.Auto(e.GetByID),
 		httpx.Auto(e.Create),
 		httpx.Auto(e.UpdateByID),
@@ -80,10 +80,10 @@ func (e *UsersResource) List(ctx context.Context, in *usersListInput) (*PageResp
 			CreatedAt: unixMilliToRFC3339(u.CreatedAt),
 		})
 	}
-	return &PageResponse[UserDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, nil
+	return &PageResponse[UserDTO]{Body: PagePayload[UserDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}}, nil
 }
 
-func (e *UsersResource) Get(ctx context.Context, in *userIDPath) (*UserDTO, error) {
+func (e *UsersResource) Get(ctx context.Context, in *userIDPath) (*JSONBody[UserDTO], error) {
 	id := strings.TrimSpace(in.ID)
 	if id == "" {
 		return nil, httpx.NewError(400, "validation")
@@ -99,16 +99,16 @@ func (e *UsersResource) Get(ctx context.Context, in *userIDPath) (*UserDTO, erro
 	for _, rid := range roleIDs {
 		outRoles = append(outRoles, string(rid))
 	}
-	return &UserDTO{
+	return wrapJSON(&UserDTO{
 		ID:        string(u.ID),
 		Email:     u.Email,
 		Name:      u.Name,
 		RoleIDs:   outRoles,
 		CreatedAt: unixMilliToRFC3339(u.CreatedAt),
-	}, nil
+	}), nil
 }
 
-func (e *UsersResource) GetByID(ctx context.Context, in *userIDPath) (*UserDTO, error) {
+func (e *UsersResource) GetByID(ctx context.Context, in *userIDPath) (*JSONBody[UserDTO], error) {
 	return e.Get(ctx, in)
 }
 
@@ -116,12 +116,16 @@ type createUserInput struct {
 	Body UserDTO `json:"body" validate:"required"`
 }
 
-func (e *UsersResource) Create(ctx context.Context, in *createUserInput) (*UserDTO, error) {
+func (e *UsersResource) Create(ctx context.Context, in *createUserInput) (*JSONBody[UserDTO], error) {
 	u := in.Body
 	if err := normalizeUserCreate(&u); err != nil {
 		return nil, err
 	}
-	return e.createUser(ctx, u)
+	dto, err := e.createUser(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	return wrapJSON(dto), nil
 }
 
 func normalizeUserCreate(u *UserDTO) error {
@@ -172,7 +176,7 @@ type updateUserInput struct {
 	Body UserDTO `json:"body" validate:"required"`
 }
 
-func (e *UsersResource) Update(ctx context.Context, in *updateUserInput) (*UserDTO, error) {
+func (e *UsersResource) Update(ctx context.Context, in *updateUserInput) (*JSONBody[UserDTO], error) {
 	if err := enforce(ctx, e.engine, "users:write", "/users"); err != nil {
 		return nil, err
 	}
@@ -197,16 +201,16 @@ func (e *UsersResource) Update(ctx context.Context, in *updateUserInput) (*UserD
 	for _, rid := range outRoles {
 		dtoRoles = append(dtoRoles, string(rid))
 	}
-	return &UserDTO{
+	return wrapJSON(&UserDTO{
 		ID:        string(updated.ID),
 		Email:     updated.Email,
 		Name:      updated.Name,
 		RoleIDs:   dtoRoles,
 		CreatedAt: unixMilliToRFC3339(updated.CreatedAt),
-	}, nil
+	}), nil
 }
 
-func (e *UsersResource) UpdateByID(ctx context.Context, in *updateUserInput) (*UserDTO, error) {
+func (e *UsersResource) UpdateByID(ctx context.Context, in *updateUserInput) (*JSONBody[UserDTO], error) {
 	return e.Update(ctx, in)
 }
 

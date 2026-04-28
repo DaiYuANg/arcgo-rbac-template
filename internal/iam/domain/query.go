@@ -64,4 +64,3 @@ type PermissionGroupsListQuery struct {
 	Order    SortOrder
 	NameLike string
 }
-

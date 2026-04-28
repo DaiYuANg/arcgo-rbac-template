@@ -19,10 +19,10 @@ func (r *PermissionRepo) Get(ctx context.Context, permID domain.PermissionID) (d
 		return domain.Permission{}, domain.ErrNotFound
 	}
 	type row struct {
-		ID        string `dbx:"id"`
-		Name      string `dbx:"name"`
-		Code      string `dbx:"code"`
-		CreatedAt int64  `dbx:"created_at"`
+		ID        string  `dbx:"id"`
+		Name      string  `dbx:"name"`
+		Code      string  `dbx:"code"`
+		CreatedAt int64   `dbx:"created_at"`
 		GroupID   *string `dbx:"group_id"`
 	}
 
@@ -93,7 +93,7 @@ func permissionListPredicates(q domain.PermissionsListQuery) []querydsl.Predicat
 }
 
 func (r *PermissionRepo) List(ctx context.Context, q domain.PermissionsListQuery) (domain.Page[domain.Permission], error) {
-	where := querydsl.And(permissionListPredicates(q)...)
+	where := predicatesAnd(permissionListPredicates(q))
 
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
@@ -240,4 +240,3 @@ func (r *PermissionRepo) ReplaceGroup(ctx context.Context, permID domain.Permiss
 	}
 	return nil
 }
-

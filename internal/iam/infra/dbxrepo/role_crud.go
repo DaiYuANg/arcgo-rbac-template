@@ -76,7 +76,7 @@ func (r *RoleRepo) Get(ctx context.Context, roleID domain.RoleID) (domain.Role, 
 }
 
 func (r *RoleRepo) List(ctx context.Context, q domain.RolesListQuery) (domain.Page[domain.Role], error) {
-	where := querydsl.And(rolesListPredicates(q)...)
+	where := predicatesAnd(rolesListPredicates(q))
 
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
@@ -219,4 +219,3 @@ func (r *RoleRepo) ReplacePermissionGroups(ctx context.Context, roleID domain.Ro
 	}
 	return nil
 }
-

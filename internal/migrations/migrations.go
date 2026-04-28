@@ -15,4 +15,3 @@ var embedded embed.FS
 func Filesystem() (fs.FS, string) {
 	return embedded, "."
 }
-

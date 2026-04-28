@@ -38,4 +38,3 @@ func Module() dix.Module {
 		),
 	)
 }
-

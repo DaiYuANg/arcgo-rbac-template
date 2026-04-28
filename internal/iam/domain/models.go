@@ -27,4 +27,3 @@ type PermissionGroup struct {
 	Description string
 	CreatedAt   int64
 }
-

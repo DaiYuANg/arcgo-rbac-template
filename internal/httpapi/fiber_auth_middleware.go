@@ -72,4 +72,3 @@ func requirePermissionFiber(engine *authx.Engine, action, resource string) fiber
 		return c.Next()
 	}
 }
-

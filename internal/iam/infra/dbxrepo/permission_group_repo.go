@@ -66,4 +66,3 @@ func (r *PermissionGroupRepo) insertPermission(groupID, permID string) querydsl.
 }
 
 var _ domain.PermissionGroupRepository = (*PermissionGroupRepo)(nil)
-

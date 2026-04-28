@@ -9,6 +9,14 @@ import (
 	"github.com/arcgolabs/dbx/querydsl"
 )
 
+// predicatesAnd folds filters with AND; an empty slice means no filter (match every row).
+func predicatesAnd(predicates []querydsl.Predicate) querydsl.Predicate {
+	if len(predicates) == 0 {
+		return querydsl.Compare(querydsl.Value(1), querydsl.OpEq, 1)
+	}
+	return querydsl.And(predicates...)
+}
+
 type oneStringRow struct {
 	Value string `dbx:"value"`
 }
@@ -30,4 +38,3 @@ func queryStringColumn(ctx context.Context, core *dbx.DB, query querydsl.Builder
 	}
 	return out, nil
 }
-

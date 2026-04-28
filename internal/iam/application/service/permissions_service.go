@@ -89,4 +89,3 @@ func (s *permissionsService) Delete(ctx context.Context, permID domain.Permissio
 }
 
 var _ PermissionsService = (*permissionsService)(nil)
-

@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/logger"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/migrations"
 	dbxmigrate "github.com/arcgolabs/dbx/migrate"
@@ -86,4 +86,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

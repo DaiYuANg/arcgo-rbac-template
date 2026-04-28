@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
-	"github.com/arcgolabs/collectionx"
 	"github.com/arcgolabs/authx"
+	"github.com/arcgolabs/collectionx"
 	"github.com/arcgolabs/dbx"
 	"golang.org/x/crypto/bcrypt"
 )

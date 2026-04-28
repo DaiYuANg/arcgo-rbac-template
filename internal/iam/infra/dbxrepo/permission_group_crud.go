@@ -76,7 +76,7 @@ func (r *PermissionGroupRepo) Get(ctx context.Context, groupID domain.Permission
 }
 
 func (r *PermissionGroupRepo) List(ctx context.Context, q domain.PermissionGroupsListQuery) (domain.Page[domain.PermissionGroup], error) {
-	where := querydsl.And(permissionGroupListPredicates(q)...)
+	where := predicatesAnd(permissionGroupListPredicates(q))
 
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
@@ -177,4 +177,3 @@ func (r *PermissionGroupRepo) Delete(ctx context.Context, groupID domain.Permiss
 	}
 	return nil
 }
-

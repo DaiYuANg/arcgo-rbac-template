@@ -14,4 +14,3 @@ type FiberBinding struct {
 type FiberBinder interface {
 	FiberBinding() FiberBinding
 }
-

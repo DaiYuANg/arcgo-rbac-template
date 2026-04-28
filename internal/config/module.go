@@ -10,4 +10,3 @@ func Module() dix.Module {
 		),
 	)
 }
-

@@ -3,10 +3,11 @@ package httpapi
 import (
 	"context"
 
+	"github.com/DaiYuANg/arcgo/kvx"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
 	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
 	"github.com/arcgolabs/authx"
-	"github.com/DaiYuANg/arcgo/kvx"
+	"github.com/arcgolabs/collectionx"
 	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/httpx"
@@ -61,26 +62,14 @@ func Module() dix.Module {
 			),
 		),
 		dix.Hooks(
-			dix.OnStart2(func(_ context.Context, app *fiber.App, binders []FiberBinder) error {
-				for _, binder := range binders {
-					if binder == nil {
-						continue
-					}
-					b := binder.FiberBinding()
-					if b.Prefix == "" || b.Handler == nil {
-						continue
-					}
-					app.Use(b.Prefix, b.Handler)
-				}
+			dix.OnStart2(func(_ context.Context, app *fiber.App, binders collectionx.List[FiberBinder]) error {
+				wireFiberBinders(app, binders)
 				return nil
 			}),
-			dix.OnStart2(func(_ context.Context, server httpx.ServerRuntime, endpoints []Endpoint) error {
-				for _, ep := range endpoints {
-					server.Register(ep)
-				}
+			dix.OnStart2(func(_ context.Context, server httpx.ServerRuntime, endpoints collectionx.List[Endpoint]) error {
+				wireHTTPEndpoints(server, endpoints)
 				return nil
 			}),
 		),
 	)
 }
-

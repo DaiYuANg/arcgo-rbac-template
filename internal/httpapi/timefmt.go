@@ -12,4 +12,3 @@ func unixMilliToRFC3339(ms int64) string {
 func nowUnixMilli() int64 {
 	return time.Now().UTC().UnixMilli()
 }
-

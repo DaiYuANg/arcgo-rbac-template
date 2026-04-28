@@ -86,4 +86,3 @@ func (s *rolesService) Delete(ctx context.Context, roleID domain.RoleID) error {
 }
 
 var _ RolesService = (*rolesService)(nil)
-

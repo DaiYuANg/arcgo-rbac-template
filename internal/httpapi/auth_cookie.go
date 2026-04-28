@@ -45,4 +45,3 @@ func cookieValue(rawCookie, key string) string {
 	}
 	return ""
 }
-

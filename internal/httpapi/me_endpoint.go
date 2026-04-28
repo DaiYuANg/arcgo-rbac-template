@@ -6,19 +6,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arcgolabs/arcgo-rbac-template/internal/authctx"
-	"github.com/arcgolabs/authx"
 	"github.com/DaiYuANg/arcgo/kvx"
-	"github.com/arcgolabs/httpx"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/authctx"
 	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
+	"github.com/arcgolabs/authx"
+	"github.com/arcgolabs/httpx"
 	"github.com/danielgtaylor/huma/v2"
 )
 
 type MeEndpoint struct {
-	engine *authx.Engine
-	svc    iamservice.MeService
-	cache  kvx.KV
+	engine      *authx.Engine
+	svc         iamservice.MeService
+	cache       kvx.KV
 	cachePrefix string
 	cacheTTL    time.Duration
 }
@@ -46,7 +46,7 @@ func (e *MeEndpoint) Register(registrar httpx.Registrar) {
 	})
 }
 
-func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*MeResponse, error) {
+func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*JSONBody[MeResponse], error) {
 	p, err := authctx.MustCurrent(ctx)
 	if err != nil {
 		return nil, httpx.NewError(401, "unauthorized")
@@ -57,7 +57,7 @@ func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*MeResponse, error) 
 	}
 
 	if cached, ok := e.cacheGet(ctx, uid); ok {
-		return cached, nil
+		return wrapJSON(cached), nil
 	}
 
 	jwtRoles := jwtRoleIDs(p)
@@ -79,7 +79,7 @@ func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*MeResponse, error) 
 	}
 
 	e.cacheSet(ctx, uid, resp)
-	return resp, nil
+	return wrapJSON(resp), nil
 }
 
 func jwtRoleIDs(p authx.Principal) []domain.RoleID {
@@ -133,4 +133,3 @@ func (e *MeEndpoint) cacheSet(ctx context.Context, uid string, resp *MeResponse)
 		slog.Default().Error("me cache set failed", "error", err)
 	}
 }
-

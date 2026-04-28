@@ -66,33 +66,33 @@ type PermissionGroupPermission struct {
 type UserSchema struct {
 	schemax.Schema[User]
 	ID        columnx.IDColumn[User, string, idgen.IDUUIDv7] `dbx:"id,pk"`
-	Email     columnx.Column[User, string] `dbx:"email"`
-	Name      columnx.Column[User, string] `dbx:"name"`
-	CreatedAt columnx.Column[User, int64]  `dbx:"created_at"`
+	Email     columnx.Column[User, string]                   `dbx:"email"`
+	Name      columnx.Column[User, string]                   `dbx:"name"`
+	CreatedAt columnx.Column[User, int64]                    `dbx:"created_at"`
 }
 
 type RoleSchema struct {
 	schemax.Schema[Role]
 	ID          columnx.IDColumn[Role, string, idgen.IDUUIDv7] `dbx:"id,pk"`
-	Name        columnx.Column[Role, string] `dbx:"name"`
-	Description columnx.Column[Role, string] `dbx:"description"`
-	CreatedAt   columnx.Column[Role, int64]  `dbx:"created_at"`
+	Name        columnx.Column[Role, string]                   `dbx:"name"`
+	Description columnx.Column[Role, string]                   `dbx:"description"`
+	CreatedAt   columnx.Column[Role, int64]                    `dbx:"created_at"`
 }
 
 type PermissionSchema struct {
 	schemax.Schema[Permission]
 	ID        columnx.IDColumn[Permission, string, idgen.IDUUIDv7] `dbx:"id,pk"`
-	Name      columnx.Column[Permission, string] `dbx:"name"`
-	Code      columnx.Column[Permission, string] `dbx:"code"`
-	CreatedAt columnx.Column[Permission, int64]  `dbx:"created_at"`
+	Name      columnx.Column[Permission, string]                   `dbx:"name"`
+	Code      columnx.Column[Permission, string]                   `dbx:"code"`
+	CreatedAt columnx.Column[Permission, int64]                    `dbx:"created_at"`
 }
 
 type PermissionGroupSchema struct {
 	schemax.Schema[PermissionGroup]
 	ID          columnx.IDColumn[PermissionGroup, string, idgen.IDUUIDv7] `dbx:"id,pk"`
-	Name        columnx.Column[PermissionGroup, string] `dbx:"name"`
-	Description columnx.Column[PermissionGroup, string] `dbx:"description"`
-	CreatedAt   columnx.Column[PermissionGroup, int64]  `dbx:"created_at"`
+	Name        columnx.Column[PermissionGroup, string]                   `dbx:"name"`
+	Description columnx.Column[PermissionGroup, string]                   `dbx:"description"`
+	CreatedAt   columnx.Column[PermissionGroup, int64]                    `dbx:"created_at"`
 }
 
 type UserRoleSchema struct {
@@ -128,13 +128,12 @@ type PermissionGroupPermissionSchema struct {
 var (
 	Users            = schemax.MustSchema("iam_users", UserSchema{})
 	Roles            = schemax.MustSchema("iam_roles", RoleSchema{})
-	Permissions       = schemax.MustSchema("iam_permissions", PermissionSchema{})
+	Permissions      = schemax.MustSchema("iam_permissions", PermissionSchema{})
 	PermissionGroups = schemax.MustSchema("iam_permission_groups", PermissionGroupSchema{})
 
-	UserRoles                 = schemax.MustSchema("iam_user_roles", UserRoleSchema{})
-	UserPermissions           = schemax.MustSchema("iam_user_permissions", UserPermissionSchema{})
-	RolePermissions           = schemax.MustSchema("iam_role_permissions", RolePermissionSchema{})
-	RolePermissionGroups      = schemax.MustSchema("iam_role_permission_groups", RolePermissionGroupSchema{})
+	UserRoles                  = schemax.MustSchema("iam_user_roles", UserRoleSchema{})
+	UserPermissions            = schemax.MustSchema("iam_user_permissions", UserPermissionSchema{})
+	RolePermissions            = schemax.MustSchema("iam_role_permissions", RolePermissionSchema{})
+	RolePermissionGroups       = schemax.MustSchema("iam_role_permission_groups", RolePermissionGroupSchema{})
 	PermissionGroupPermissions = schemax.MustSchema("iam_permission_group_permissions", PermissionGroupPermissionSchema{})
 )
-

@@ -30,4 +30,3 @@ func enforce(ctx context.Context, engine *authx.Engine, action, resource string)
 	}
 	return nil
 }
-

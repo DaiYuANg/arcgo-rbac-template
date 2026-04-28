@@ -6,4 +6,3 @@ type PasswordCredential struct {
 	Username string
 	Password string
 }
-

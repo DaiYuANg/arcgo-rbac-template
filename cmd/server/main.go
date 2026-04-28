@@ -15,8 +15,8 @@ import (
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/application"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/kv"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/logger"
-	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/dbx"
+	"github.com/arcgolabs/dix"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"

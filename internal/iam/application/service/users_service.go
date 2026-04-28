@@ -86,4 +86,3 @@ func (s *usersService) Delete(ctx context.Context, userID domain.UserID) error {
 }
 
 var _ UsersService = (*usersService)(nil)
-

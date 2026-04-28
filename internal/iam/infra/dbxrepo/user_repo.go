@@ -89,4 +89,3 @@ func (r *UserRepo) GrantPermission(ctx context.Context, userID domain.UserID, pe
 }
 
 var _ domain.UserRepository = (*UserRepo)(nil)
-

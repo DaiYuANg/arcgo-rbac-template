@@ -15,7 +15,7 @@ type updatePermBulkInput struct {
 	} `json:"body"`
 }
 
-func (e *PermissionsResource) UpdateMany(ctx context.Context, in *updatePermBulkInput) (*[]PermissionDTO, error) {
+func (e *PermissionsResource) UpdateMany(ctx context.Context, in *updatePermBulkInput) (*BulkResponse[PermissionDTO], error) {
 	if err := enforce(ctx, e.engine, "permissions:write", "/permissions"); err != nil {
 		return nil, err
 	}
@@ -55,10 +55,10 @@ func (e *PermissionsResource) UpdateMany(ctx context.Context, in *updatePermBulk
 			CreatedAt: unixMilliToRFC3339(updated.CreatedAt),
 		})
 	}
-	return &out, nil
+	return &BulkResponse[PermissionDTO]{Body: BulkPayload[PermissionDTO]{Items: out}}, nil
 }
 
-func (e *PermissionsResource) DeleteMany(ctx context.Context, in *idsQuery) (*[]PermissionDTO, error) {
+func (e *PermissionsResource) DeleteMany(ctx context.Context, in *idsQuery) (*BulkResponse[PermissionDTO], error) {
 	if err := enforce(ctx, e.engine, "permissions:write", "/permissions"); err != nil {
 		return nil, err
 	}
@@ -67,11 +67,11 @@ func (e *PermissionsResource) DeleteMany(ctx context.Context, in *idsQuery) (*[]
 	for _, id := range ids {
 		item, err := e.Get(ctx, &userIDPath{ID: id})
 		if err == nil && item != nil {
-			out = append(out, *item)
+			out = append(out, item.Body)
 		}
 		if _, err := e.Delete(ctx, &userIDPath{ID: id}); err != nil {
 			return nil, err
 		}
 	}
-	return &out, nil
+	return &BulkResponse[PermissionDTO]{Body: BulkPayload[PermissionDTO]{Items: out}}, nil
 }

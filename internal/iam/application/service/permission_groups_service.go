@@ -68,4 +68,3 @@ func (s *permissionGroupsService) Delete(ctx context.Context, groupID domain.Per
 }
 
 var _ PermissionGroupsService = (*permissionGroupsService)(nil)
-

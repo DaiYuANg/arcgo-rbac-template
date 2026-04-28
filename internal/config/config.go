@@ -59,9 +59,9 @@ type KVConfig struct {
 	// Driver: "valkey" (default) or "redis"
 	Driver string
 	// Addr: host:port
-	Addr string
+	Addr     string
 	Password string
-	DB int
+	DB       int
 	// Prefix for keys, e.g. "arcgo:"
 	Prefix string
 	// DefaultTTL for cache entries.
@@ -146,25 +146,25 @@ func Load() (Config, error) {
 		configx.WithEnvPrefix(""),
 		configx.WithEnvSeparator("_"),
 		configx.WithDefaults(map[string]any{
-			"http.addr":              ":8080",
-			"db.driver":              "sqlite",
-			"db.dsn":                 "file:rbac.db?_pragma=busy_timeout(5000)",
-			"jwt.issuer":             "arcgo-rbac-template",
-			"jwt.audience":           "arcgo",
-			"access.token.ttl":       "30m",
-			"refresh.token.ttl":      "168h",
-			"allow.insecure.dev":     true,
-			"auth.sources":           "root,db",
-			"auth.root.username":     "root",
-			"auth.root.password":     "root",
+			"http.addr":               ":8080",
+			"db.driver":               "sqlite",
+			"db.dsn":                  "file:rbac.db?_pragma=busy_timeout(5000)",
+			"jwt.issuer":              "arcgo-rbac-template",
+			"jwt.audience":            "arcgo",
+			"access.token.ttl":        "30m",
+			"refresh.token.ttl":       "168h",
+			"allow.insecure.dev":      true,
+			"auth.sources":            "root,db",
+			"auth.root.username":      "root",
+			"auth.root.password":      "root",
 			"bootstrap.admin.user.id": "admin",
-			"kv.enabled":             false,
-			"kv.driver":              "valkey",
-			"kv.addr":                "127.0.0.1:6379",
-			"kv.password":            "",
-			"kv.db":                  0,
-			"kv.prefix":              "arcgo:",
-			"kv.default_ttl":         "30s",
+			"kv.enabled":              false,
+			"kv.driver":               "valkey",
+			"kv.addr":                 "127.0.0.1:6379",
+			"kv.password":             "",
+			"kv.db":                   0,
+			"kv.prefix":               "arcgo:",
+			"kv.default_ttl":          "30s",
 		}),
 	)
 	if err != nil {
@@ -257,4 +257,3 @@ func ensureNonEmptyDSN(cfg *Config) error {
 func FromEnv() (Config, error) {
 	return Load()
 }
-

@@ -45,8 +45,8 @@ type permListInput struct {
 
 func (e *PermissionsResource) Register(registrar httpx.Registrar) {
 	g := registrar.Scope()
+	httpx.MustGroupGet(g, "", e.ListOrGetMany)
 	httpx.MustAuto(g,
-		httpx.Auto(e.ListOrGetMany),
 		httpx.Auto(e.GetByID),
 		httpx.Auto(e.Create),
 		httpx.Auto(e.UpdateByID),
@@ -63,11 +63,11 @@ func (e *PermissionsResource) ListOrGetMany(ctx context.Context, in *permListInp
 		for _, id := range splitIDs(in.ID) {
 			item, err := e.Get(ctx, &userIDPath{ID: id})
 			if err == nil && item != nil {
-				items = append(items, *item)
+				items = append(items, item.Body)
 			}
 		}
 		pageSize := int64(len(items))
-		return &PageResponse[PermissionDTO]{Items: items, Total: pageSize, Page: 1, PageSize: pageSize}, nil
+		return &PageResponse[PermissionDTO]{Body: PagePayload[PermissionDTO]{Items: items, Total: pageSize, Page: 1, PageSize: pageSize}}, nil
 	}
 	return e.List(ctx, in)
 }
@@ -104,10 +104,10 @@ func (e *PermissionsResource) List(ctx context.Context, in *permListInput) (*Pag
 			CreatedAt: unixMilliToRFC3339(p.CreatedAt),
 		})
 	}
-	return &PageResponse[PermissionDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, nil
+	return &PageResponse[PermissionDTO]{Body: PagePayload[PermissionDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}}, nil
 }
 
-func (e *PermissionsResource) Get(ctx context.Context, in *userIDPath) (*PermissionDTO, error) {
+func (e *PermissionsResource) Get(ctx context.Context, in *userIDPath) (*JSONBody[PermissionDTO], error) {
 	id := strings.TrimSpace(in.ID)
 	p, gid, err := e.svc.Get(ctx, domain.PermissionID(id))
 	if err != nil {
@@ -121,16 +121,16 @@ func (e *PermissionsResource) Get(ctx context.Context, in *userIDPath) (*Permiss
 		v := string(*gid)
 		groupID = &v
 	}
-	return &PermissionDTO{
+	return wrapJSON(&PermissionDTO{
 		ID:        string(p.ID),
 		Name:      p.Name,
 		Code:      p.Code,
 		GroupID:   groupID,
 		CreatedAt: unixMilliToRFC3339(p.CreatedAt),
-	}, nil
+	}), nil
 }
 
-func (e *PermissionsResource) GetByID(ctx context.Context, in *userIDPath) (*PermissionDTO, error) {
+func (e *PermissionsResource) GetByID(ctx context.Context, in *userIDPath) (*JSONBody[PermissionDTO], error) {
 	return e.Get(ctx, in)
 }
 
@@ -138,12 +138,16 @@ type createPermInput struct {
 	Body PermissionDTO `json:"body" validate:"required"`
 }
 
-func (e *PermissionsResource) Create(ctx context.Context, in *createPermInput) (*PermissionDTO, error) {
+func (e *PermissionsResource) Create(ctx context.Context, in *createPermInput) (*JSONBody[PermissionDTO], error) {
 	p := in.Body
 	if err := normalizePermissionCreate(&p); err != nil {
 		return nil, err
 	}
-	return e.createPermission(ctx, p)
+	dto, err := e.createPermission(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return wrapJSON(dto), nil
 }
 
 func normalizePermissionCreate(p *PermissionDTO) error {
@@ -197,16 +201,16 @@ type createPermBulkInput struct {
 	Body BulkItems[PermissionDTO] `json:"body"`
 }
 
-func (e *PermissionsResource) CreateMany(ctx context.Context, in *createPermBulkInput) (*[]PermissionDTO, error) {
+func (e *PermissionsResource) CreateMany(ctx context.Context, in *createPermBulkInput) (*BulkResponse[PermissionDTO], error) {
 	out := make([]PermissionDTO, 0, len(in.Body.Items))
 	for _, item := range in.Body.Items {
 		created, err := e.Create(ctx, &createPermInput{Body: item})
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, *created)
+		out = append(out, created.Body)
 	}
-	return &out, nil
+	return &BulkResponse[PermissionDTO]{Body: BulkPayload[PermissionDTO]{Items: out}}, nil
 }
 
 type updatePermInput struct {
@@ -214,7 +218,7 @@ type updatePermInput struct {
 	Body PermissionDTO `json:"body" validate:"required"`
 }
 
-func (e *PermissionsResource) Update(ctx context.Context, in *updatePermInput) (*PermissionDTO, error) {
+func (e *PermissionsResource) Update(ctx context.Context, in *updatePermInput) (*JSONBody[PermissionDTO], error) {
 	if err := enforce(ctx, e.engine, "permissions:write", "/permissions"); err != nil {
 		return nil, err
 	}
@@ -244,16 +248,16 @@ func (e *PermissionsResource) Update(ctx context.Context, in *updatePermInput) (
 		v := string(*outGID)
 		groupID = &v
 	}
-	return &PermissionDTO{
+	return wrapJSON(&PermissionDTO{
 		ID:        string(updated.ID),
 		Name:      updated.Name,
 		Code:      updated.Code,
 		GroupID:   groupID,
 		CreatedAt: unixMilliToRFC3339(updated.CreatedAt),
-	}, nil
+	}), nil
 }
 
-func (e *PermissionsResource) UpdateByID(ctx context.Context, in *updatePermInput) (*PermissionDTO, error) {
+func (e *PermissionsResource) UpdateByID(ctx context.Context, in *updatePermInput) (*JSONBody[PermissionDTO], error) {
 	return e.Update(ctx, in)
 }
 

@@ -30,11 +30,11 @@ func (e *DashboardEndpoint) Register(registrar httpx.Registrar) {
 	})
 }
 
-func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*DashboardStatsResponse, error) {
+func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*JSONBody[DashboardStatsResponse], error) {
 	out := &DashboardStatsResponse{}
 	if e.core == nil {
 		// still return shape; frontend treats this endpoint as optional.
-		return out, nil
+		return wrapJSON(out), nil
 	}
 
 	var totalUsers int64
@@ -177,6 +177,5 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*DashboardS
 		}{}
 	}
 
-	return out, nil
+	return wrapJSON(out), nil
 }
-

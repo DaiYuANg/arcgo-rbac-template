@@ -4,8 +4,8 @@ package application
 import (
 	"context"
 	"fmt"
-	"strings"
 	"slices"
+	"strings"
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 )
@@ -106,4 +106,3 @@ func (a *Authorizer) hasRolePermission(ctx context.Context, roles []domain.RoleI
 func containsPerm(xs []domain.PermissionID, want domain.PermissionID) bool {
 	return slices.Contains(xs, want)
 }
-

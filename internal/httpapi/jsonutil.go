@@ -19,4 +19,3 @@ func jsonUnmarshal(data []byte, v any) error {
 	}
 	return nil
 }
-

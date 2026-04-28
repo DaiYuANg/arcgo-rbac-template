@@ -35,4 +35,3 @@ func (r *PermissionRepo) Ensure(ctx context.Context, permID domain.PermissionID)
 }
 
 var _ domain.PermissionRepository = (*PermissionRepo)(nil)
-

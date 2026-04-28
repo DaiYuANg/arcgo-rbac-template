@@ -85,7 +85,7 @@ func (r *UserRepo) Get(ctx context.Context, userID domain.UserID) (domain.User, 
 }
 
 func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Page[domain.User], error) {
-	where := querydsl.And(usersListPredicates(q)...)
+	where := predicatesAnd(usersListPredicates(q))
 
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
@@ -206,4 +206,3 @@ func (r *UserRepo) ReplaceRoles(ctx context.Context, userID domain.UserID, roleI
 	}
 	return nil
 }
-

@@ -6,18 +6,18 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
-	"github.com/arcgolabs/dix"
 	"github.com/DaiYuANg/arcgo/kvx"
 	redisadapter "github.com/DaiYuANg/arcgo/kvx/adapter/redis"
 	valkeyadapter "github.com/DaiYuANg/arcgo/kvx/adapter/valkey"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
+	"github.com/arcgolabs/dix"
 )
 
-// Module provides an optional kvx.Client (Valkey/Redis).
+// Module provides an optional kvx.KV (Valkey/Redis via kvx.Client).
 func Module() dix.Module {
 	return dix.NewModule("kv",
 		dix.Providers(
-			dix.ProviderErr2(func(cfg config.Config, logger *slog.Logger) (kvx.Client, error) {
+			dix.ProviderErr2(func(cfg config.Config, logger *slog.Logger) (kvx.KV, error) {
 				if !cfg.KV.Enabled {
 					return nil, nil
 				}
@@ -40,16 +40,21 @@ func Module() dix.Module {
 				default:
 					return nil, context.Canceled
 				}
-			}, dix.As[kvx.KV]()),
+			}),
 		),
 		dix.Hooks(
-			dix.OnStop(func(_ context.Context, client kvx.Client) error {
-				if client == nil {
+			dix.OnStop(func(_ context.Context, k kvx.KV) error {
+				if k == nil {
 					return nil
 				}
-				return client.Close()
+				type closer interface {
+					Close() error
+				}
+				if c, ok := k.(closer); ok {
+					return c.Close()
+				}
+				return nil
 			}),
 		),
 	)
 }
-

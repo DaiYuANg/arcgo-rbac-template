@@ -44,8 +44,8 @@ type pgListInput struct {
 
 func (e *PermissionGroupsResource) Register(registrar httpx.Registrar) {
 	g := registrar.Scope()
+	httpx.MustGroupGet(g, "", e.ListOrGetMany)
 	httpx.MustAuto(g,
-		httpx.Auto(e.ListOrGetMany),
 		httpx.Auto(e.GetByID),
 		httpx.Auto(e.Create),
 		httpx.Auto(e.UpdateByID),
@@ -62,11 +62,11 @@ func (e *PermissionGroupsResource) ListOrGetMany(ctx context.Context, in *pgList
 		for _, id := range splitIDs(in.ID) {
 			item, err := e.Get(ctx, &userIDPath{ID: id})
 			if err == nil && item != nil {
-				items = append(items, *item)
+				items = append(items, item.Body)
 			}
 		}
 		pageSize := int64(len(items))
-		return &PageResponse[PermissionGroupDTO]{Items: items, Total: pageSize, Page: 1, PageSize: pageSize}, nil
+		return &PageResponse[PermissionGroupDTO]{Body: PagePayload[PermissionGroupDTO]{Items: items, Total: pageSize, Page: 1, PageSize: pageSize}}, nil
 	}
 	return e.List(ctx, in)
 }
@@ -91,10 +91,10 @@ func (e *PermissionGroupsResource) List(ctx context.Context, in *pgListInput) (*
 			CreatedAt:   unixMilliToRFC3339(g.CreatedAt),
 		})
 	}
-	return &PageResponse[PermissionGroupDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, nil
+	return &PageResponse[PermissionGroupDTO]{Body: PagePayload[PermissionGroupDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}}, nil
 }
 
-func (e *PermissionGroupsResource) Get(ctx context.Context, in *userIDPath) (*PermissionGroupDTO, error) {
+func (e *PermissionGroupsResource) Get(ctx context.Context, in *userIDPath) (*JSONBody[PermissionGroupDTO], error) {
 	id := strings.TrimSpace(in.ID)
 	g, err := e.svc.Get(ctx, domain.PermissionGroupID(id))
 	if err != nil {
@@ -103,15 +103,15 @@ func (e *PermissionGroupsResource) Get(ctx context.Context, in *userIDPath) (*Pe
 		}
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	return &PermissionGroupDTO{
+	return wrapJSON(&PermissionGroupDTO{
 		ID:          string(g.ID),
 		Name:        g.Name,
 		Description: g.Description,
 		CreatedAt:   unixMilliToRFC3339(g.CreatedAt),
-	}, nil
+	}), nil
 }
 
-func (e *PermissionGroupsResource) GetByID(ctx context.Context, in *userIDPath) (*PermissionGroupDTO, error) {
+func (e *PermissionGroupsResource) GetByID(ctx context.Context, in *userIDPath) (*JSONBody[PermissionGroupDTO], error) {
 	return e.Get(ctx, in)
 }
 
@@ -119,7 +119,7 @@ type createPGInput struct {
 	Body PermissionGroupDTO `json:"body" validate:"required"`
 }
 
-func (e *PermissionGroupsResource) Create(ctx context.Context, in *createPGInput) (*PermissionGroupDTO, error) {
+func (e *PermissionGroupsResource) Create(ctx context.Context, in *createPGInput) (*JSONBody[PermissionGroupDTO], error) {
 	if err := enforce(ctx, e.engine, "permission-groups:write", "/permission-groups"); err != nil {
 		return nil, err
 	}
@@ -144,23 +144,23 @@ func (e *PermissionGroupsResource) Create(ctx context.Context, in *createPGInput
 	pg.Name = created.Name
 	pg.Description = created.Description
 	pg.CreatedAt = unixMilliToRFC3339(created.CreatedAt)
-	return &pg, nil
+	return wrapJSON(&pg), nil
 }
 
 type createPGBulkInput struct {
 	Body BulkItems[PermissionGroupDTO] `json:"body"`
 }
 
-func (e *PermissionGroupsResource) CreateMany(ctx context.Context, in *createPGBulkInput) (*[]PermissionGroupDTO, error) {
+func (e *PermissionGroupsResource) CreateMany(ctx context.Context, in *createPGBulkInput) (*BulkResponse[PermissionGroupDTO], error) {
 	out := make([]PermissionGroupDTO, 0, len(in.Body.Items))
 	for _, item := range in.Body.Items {
 		created, err := e.Create(ctx, &createPGInput{Body: item})
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, *created)
+		out = append(out, created.Body)
 	}
-	return &out, nil
+	return &BulkResponse[PermissionGroupDTO]{Body: BulkPayload[PermissionGroupDTO]{Items: out}}, nil
 }
 
 type updatePGInput struct {
@@ -168,7 +168,7 @@ type updatePGInput struct {
 	Body PermissionGroupDTO `json:"body" validate:"required"`
 }
 
-func (e *PermissionGroupsResource) Update(ctx context.Context, in *updatePGInput) (*PermissionGroupDTO, error) {
+func (e *PermissionGroupsResource) Update(ctx context.Context, in *updatePGInput) (*JSONBody[PermissionGroupDTO], error) {
 	if err := enforce(ctx, e.engine, "permission-groups:write", "/permission-groups"); err != nil {
 		return nil, err
 	}
@@ -185,15 +185,15 @@ func (e *PermissionGroupsResource) Update(ctx context.Context, in *updatePGInput
 		}
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	return &PermissionGroupDTO{
+	return wrapJSON(&PermissionGroupDTO{
 		ID:          string(updated.ID),
 		Name:        updated.Name,
 		Description: updated.Description,
 		CreatedAt:   unixMilliToRFC3339(updated.CreatedAt),
-	}, nil
+	}), nil
 }
 
-func (e *PermissionGroupsResource) UpdateByID(ctx context.Context, in *updatePGInput) (*PermissionGroupDTO, error) {
+func (e *PermissionGroupsResource) UpdateByID(ctx context.Context, in *updatePGInput) (*JSONBody[PermissionGroupDTO], error) {
 	return e.Update(ctx, in)
 }
 
@@ -202,7 +202,7 @@ type updatePGBulkInput struct {
 	Body PermissionGroupDTO `json:"body"`
 }
 
-func (e *PermissionGroupsResource) UpdateMany(ctx context.Context, in *updatePGBulkInput) (*[]PermissionGroupDTO, error) {
+func (e *PermissionGroupsResource) UpdateMany(ctx context.Context, in *updatePGBulkInput) (*BulkResponse[PermissionGroupDTO], error) {
 	ids := splitIDs(in.ID)
 	out := make([]PermissionGroupDTO, 0, len(ids))
 	for _, id := range ids {
@@ -210,9 +210,9 @@ func (e *PermissionGroupsResource) UpdateMany(ctx context.Context, in *updatePGB
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, *item)
+		out = append(out, item.Body)
 	}
-	return &out, nil
+	return &BulkResponse[PermissionGroupDTO]{Body: BulkPayload[PermissionGroupDTO]{Items: out}}, nil
 }
 
 func (e *PermissionGroupsResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, error) {
@@ -230,7 +230,7 @@ func (e *PermissionGroupsResource) DeleteByID(ctx context.Context, in *userIDPat
 	return e.Delete(ctx, in)
 }
 
-func (e *PermissionGroupsResource) DeleteMany(ctx context.Context, in *idsQuery) (*[]PermissionGroupDTO, error) {
+func (e *PermissionGroupsResource) DeleteMany(ctx context.Context, in *idsQuery) (*BulkResponse[PermissionGroupDTO], error) {
 	if err := enforce(ctx, e.engine, "permission-groups:write", "/permission-groups"); err != nil {
 		return nil, err
 	}
@@ -239,11 +239,11 @@ func (e *PermissionGroupsResource) DeleteMany(ctx context.Context, in *idsQuery)
 	for _, id := range ids {
 		item, err := e.Get(ctx, &userIDPath{ID: id})
 		if err == nil && item != nil {
-			out = append(out, *item)
+			out = append(out, item.Body)
 		}
 		if _, err := e.Delete(ctx, &userIDPath{ID: id}); err != nil {
 			return nil, err
 		}
 	}
-	return &out, nil
+	return &BulkResponse[PermissionGroupDTO]{Body: BulkPayload[PermissionGroupDTO]{Items: out}}, nil
 }

@@ -20,10 +20,9 @@ func (e *HealthEndpoint) EndpointSpec() httpx.EndpointSpec {
 
 func (e *HealthEndpoint) Register(registrar httpx.Registrar) {
 	g := registrar.Scope()
-	httpx.MustGroupGet(g, "", func(_ context.Context, _ *struct{}) (*HealthResponse, error) {
-		return &HealthResponse{Status: "UP"}, nil
+	httpx.MustGroupGet(g, "", func(_ context.Context, _ *struct{}) (*JSONBody[HealthResponse], error) {
+		return &JSONBody[HealthResponse]{Body: HealthResponse{State: "UP"}}, nil
 	}, func(op *huma.Operation) {
 		op.Summary = "Health check"
 	})
 }
-

@@ -64,4 +64,3 @@ type PermissionGroupRepository interface {
 	ListPermissions(ctx context.Context, groupID PermissionGroupID) ([]PermissionID, error)
 	AddPermission(ctx context.Context, groupID PermissionGroupID, permID PermissionID) error
 }
-

@@ -28,4 +28,3 @@ type Page[T any] struct {
 	Page     int64
 	PageSize int64
 }
-

@@ -44,8 +44,8 @@ type rolesListInput struct {
 
 func (e *RolesResource) Register(registrar httpx.Registrar) {
 	g := registrar.Scope()
+	httpx.MustGroupGet(g, "", e.ListOrGetMany)
 	httpx.MustAuto(g,
-		httpx.Auto(e.ListOrGetMany),
 		httpx.Auto(e.GetByID),
 		httpx.Auto(e.Create),
 		httpx.Auto(e.UpdateByID),
@@ -60,7 +60,7 @@ func (e *RolesResource) ListOrGetMany(ctx context.Context, in *rolesListInput) (
 	if strings.TrimSpace(in.ID) != "" {
 		items := e.getMany(ctx, splitIDs(in.ID))
 		pageSize := int64(len(items))
-		return &PageResponse[RoleDTO]{Items: items, Total: pageSize, Page: 1, PageSize: pageSize}, nil
+		return &PageResponse[RoleDTO]{Body: PagePayload[RoleDTO]{Items: items, Total: pageSize, Page: 1, PageSize: pageSize}}, nil
 	}
 	return e.List(ctx, in)
 }
@@ -96,10 +96,10 @@ func (e *RolesResource) List(ctx context.Context, in *rolesListInput) (*PageResp
 		})
 	}
 
-	return &PageResponse[RoleDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, nil
+	return &PageResponse[RoleDTO]{Body: PagePayload[RoleDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}}, nil
 }
 
-func (e *RolesResource) Get(ctx context.Context, in *userIDPath) (*RoleDTO, error) {
+func (e *RolesResource) Get(ctx context.Context, in *userIDPath) (*JSONBody[RoleDTO], error) {
 	id := strings.TrimSpace(in.ID)
 	if id == "" {
 		return nil, httpx.NewError(422, "validation")
@@ -115,16 +115,16 @@ func (e *RolesResource) Get(ctx context.Context, in *userIDPath) (*RoleDTO, erro
 	for _, gid := range gids {
 		outGids = append(outGids, string(gid))
 	}
-	return &RoleDTO{
+	return wrapJSON(&RoleDTO{
 		ID:                 string(r.ID),
 		Name:               r.Name,
 		Description:        r.Description,
 		PermissionGroupIDs: outGids,
 		CreatedAt:          unixMilliToRFC3339(r.CreatedAt),
-	}, nil
+	}), nil
 }
 
-func (e *RolesResource) GetByID(ctx context.Context, in *userIDPath) (*RoleDTO, error) {
+func (e *RolesResource) GetByID(ctx context.Context, in *userIDPath) (*JSONBody[RoleDTO], error) {
 	return e.Get(ctx, in)
 }
 
@@ -132,7 +132,7 @@ type createRoleInput struct {
 	Body RoleDTO `json:"body" validate:"required"`
 }
 
-func (e *RolesResource) Create(ctx context.Context, in *createRoleInput) (*RoleDTO, error) {
+func (e *RolesResource) Create(ctx context.Context, in *createRoleInput) (*JSONBody[RoleDTO], error) {
 	if err := enforce(ctx, e.engine, "roles:write", "/roles"); err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (e *RolesResource) Create(ctx context.Context, in *createRoleInput) (*RoleD
 	for _, gid := range outGroups {
 		r.PermissionGroupIDs = append(r.PermissionGroupIDs, string(gid))
 	}
-	return &r, nil
+	return wrapJSON(&r), nil
 }
 
 type updateRoleInput struct {
@@ -176,7 +176,7 @@ type updateRoleInput struct {
 	Body RoleDTO `json:"body" validate:"required"`
 }
 
-func (e *RolesResource) Update(ctx context.Context, in *updateRoleInput) (*RoleDTO, error) {
+func (e *RolesResource) Update(ctx context.Context, in *updateRoleInput) (*JSONBody[RoleDTO], error) {
 	if err := enforce(ctx, e.engine, "roles:write", "/roles"); err != nil {
 		return nil, err
 	}
@@ -201,16 +201,16 @@ func (e *RolesResource) Update(ctx context.Context, in *updateRoleInput) (*RoleD
 	for _, gid := range outGroups {
 		dtoGroups = append(dtoGroups, string(gid))
 	}
-	return &RoleDTO{
+	return wrapJSON(&RoleDTO{
 		ID:                 string(updated.ID),
 		Name:               updated.Name,
 		Description:        updated.Description,
 		PermissionGroupIDs: dtoGroups,
 		CreatedAt:          unixMilliToRFC3339(updated.CreatedAt),
-	}, nil
+	}), nil
 }
 
-func (e *RolesResource) UpdateByID(ctx context.Context, in *updateRoleInput) (*RoleDTO, error) {
+func (e *RolesResource) UpdateByID(ctx context.Context, in *updateRoleInput) (*JSONBody[RoleDTO], error) {
 	return e.Update(ctx, in)
 }
 

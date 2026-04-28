@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DaiYuANg/arcgo/kvx"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/authn"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
 	"github.com/arcgolabs/authx"
-	"github.com/DaiYuANg/arcgo/kvx"
 	authjwt "github.com/arcgolabs/authx/jwt"
 	"github.com/arcgolabs/httpx"
 	"github.com/danielgtaylor/huma/v2"
@@ -18,9 +18,9 @@ import (
 )
 
 type AuthEndpoint struct {
-	cfg    config.Config
-	engine *authx.Engine
-	cache  kvx.KV
+	cfg         config.Config
+	engine      *authx.Engine
+	cache       kvx.KV
 	cachePrefix string
 }
 
@@ -43,16 +43,21 @@ func (e *AuthEndpoint) Register(registrar httpx.Registrar) {
 	})
 }
 
-type loginInput struct {
-	Body LoginRequest `json:"body" validate:"required"`
-}
-
+// tokenWithCookieOutput follows Huma: only the field named Body is serialized as JSON
+// (flat shape from TokenResponse at the wire — not {"body":{...}}).
 type tokenWithCookieOutput struct {
-	AccessToken string `json:"accessToken"`
-	SetCookie   string `header:"Set-Cookie"`
+	Body      TokenResponse `doc:"JWT access token payload"`
+	SetCookie string        `header:"Set-Cookie"`
 }
 
-func (e *AuthEndpoint) Login(ctx context.Context, in *loginInput) (*tokenWithCookieOutput, error) {
+// loginHTTPInput is the Huma request shape: HTTP JSON body binds to field `Body`.
+// Without a literal `Body` field, huma skips parsing the POST body entirely.
+// Raw JSON is unmarshaled directly into LoginRequest (flat {"username","password"}).
+type loginHTTPInput struct {
+	Body LoginRequest
+}
+
+func (e *AuthEndpoint) Login(ctx context.Context, in *loginHTTPInput) (*tokenWithCookieOutput, error) {
 	if e.engine == nil {
 		return nil, httpx.NewError(500, "auth_engine_missing")
 	}
@@ -97,8 +102,8 @@ func (e *AuthEndpoint) Login(ctx context.Context, in *loginInput) (*tokenWithCoo
 	}
 
 	return &tokenWithCookieOutput{
-		AccessToken: raw,
-		SetCookie:   buildRefreshCookie(refresh, !e.cfg.Auth.AllowInsecureDev, int(e.cfg.Auth.RefreshTokenTTL.Seconds())),
+		Body:      TokenResponse{AccessToken: raw},
+		SetCookie: buildRefreshCookie(refresh, !e.cfg.Auth.AllowInsecureDev, int(e.cfg.Auth.RefreshTokenTTL.Seconds())),
 	}, nil
 }
 
@@ -127,8 +132,8 @@ func (e *AuthEndpoint) Refresh(ctx context.Context, in *refreshInput) (*tokenWit
 			return nil, httpx.NewError(500, "token_sign_failed", err)
 		}
 		return &tokenWithCookieOutput{
-			AccessToken: access,
-			SetCookie:   buildRefreshCookie(newRefresh, !e.cfg.Auth.AllowInsecureDev, int(e.cfg.Auth.RefreshTokenTTL.Seconds())),
+			Body:      TokenResponse{AccessToken: access},
+			SetCookie: buildRefreshCookie(newRefresh, !e.cfg.Auth.AllowInsecureDev, int(e.cfg.Auth.RefreshTokenTTL.Seconds())),
 		}, nil
 	}
 
@@ -156,8 +161,8 @@ func (e *AuthEndpoint) Refresh(ctx context.Context, in *refreshInput) (*tokenWit
 	}
 
 	return &tokenWithCookieOutput{
-		AccessToken: access,
-		SetCookie:   buildRefreshCookie(newRefresh, !e.cfg.Auth.AllowInsecureDev, int(e.cfg.Auth.RefreshTokenTTL.Seconds())),
+		Body:      TokenResponse{AccessToken: access},
+		SetCookie: buildRefreshCookie(newRefresh, !e.cfg.Auth.AllowInsecureDev, int(e.cfg.Auth.RefreshTokenTTL.Seconds())),
 	}, nil
 }
 
@@ -206,4 +211,3 @@ func (e *AuthEndpoint) signRefreshToken(subject string, roles []string) (string,
 	}
 	return raw, nil
 }
-

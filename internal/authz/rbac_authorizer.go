@@ -52,4 +52,3 @@ func (a *IAMAuthorizer) Authorize(ctx context.Context, input authx.Authorization
 		PolicyID: "",
 	}, nil
 }
-

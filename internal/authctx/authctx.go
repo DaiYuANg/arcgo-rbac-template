@@ -35,4 +35,3 @@ func UserID(ctx context.Context) (string, bool) {
 	}
 	return strings.TrimSpace(p.ID), true
 }
-

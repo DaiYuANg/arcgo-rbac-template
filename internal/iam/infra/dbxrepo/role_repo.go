@@ -58,4 +58,3 @@ func (r *RoleRepo) GrantPermission(ctx context.Context, roleID domain.RoleID, pe
 }
 
 var _ domain.RoleRepository = (*RoleRepo)(nil)
-
