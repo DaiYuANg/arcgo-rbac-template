@@ -6,16 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arcgolabs/authx"
-	"github.com/arcgolabs/httpx"
 	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
+	"github.com/arcgolabs/authx"
+	"github.com/arcgolabs/httpx"
 )
 
 type UsersResource struct {
-	engine *authx.Engine
-	svc    iamservice.UsersService
-	cacheTTL    time.Duration
+	engine   *authx.Engine
+	svc      iamservice.UsersService
+	cacheTTL time.Duration
 }
 
 func (e *UsersResource) FiberBinding() FiberBinding {
@@ -35,12 +35,13 @@ func (e *UsersResource) EndpointSpec() httpx.EndpointSpec {
 }
 
 type usersListInput struct {
-	Page     int64  `minimum:"1"        query:"page"`
-	PageSize int64  `minimum:"1"        query:"pageSize"`
-	Q        string `query:"q"`
-	Sort     string `query:"sort"`
-	Order    string `query:"order"`
-	NameLike string `query:"name_like"`
+	ID        string `query:"id"`
+	Page      int64  `minimum:"1"        query:"page"     validate:"required_without=ID,omitempty,min=1"`
+	PageSize  int64  `minimum:"1"        query:"pageSize" validate:"required_without=ID,omitempty,min=1"`
+	Q         string `query:"q"`
+	Sort      string `query:"sort"`
+	Order     string `query:"order"`
+	NameLike  string `query:"name_like"`
 	EmailLike string `query:"email_like"`
 }
 
@@ -59,16 +60,13 @@ func (e *UsersResource) Register(registrar httpx.Registrar) {
 }
 
 func (e *UsersResource) List(ctx context.Context, in *usersListInput) (*PageResponse[UserDTO], error) {
-	if in.Page <= 0 || in.PageSize <= 0 {
-		return nil, httpx.NewError(400, "validation", errors.New("page and pageSize are required"))
-	}
 	page, err := e.svc.List(ctx, domain.UsersListQuery{
 		PageParams: domain.PageParams{Page: in.Page, PageSize: in.PageSize},
-		Q:         strings.TrimSpace(in.Q),
-		Sort:      strings.TrimSpace(in.Sort),
-		Order:     domain.NormalizeOrder(in.Order),
-		NameLike:  strings.TrimSpace(in.NameLike),
-		EmailLike: strings.TrimSpace(in.EmailLike),
+		Q:          strings.TrimSpace(in.Q),
+		Sort:       strings.TrimSpace(in.Sort),
+		Order:      domain.NormalizeOrder(in.Order),
+		NameLike:   strings.TrimSpace(in.NameLike),
+		EmailLike:  strings.TrimSpace(in.EmailLike),
 	})
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
@@ -83,10 +81,6 @@ func (e *UsersResource) List(ctx context.Context, in *usersListInput) (*PageResp
 		})
 	}
 	return &PageResponse[UserDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, nil
-}
-
-type userIDPath struct {
-	ID string `path:"id"`
 }
 
 func (e *UsersResource) Get(ctx context.Context, in *userIDPath) (*UserDTO, error) {
@@ -119,7 +113,7 @@ func (e *UsersResource) GetByID(ctx context.Context, in *userIDPath) (*UserDTO, 
 }
 
 type createUserInput struct {
-	Body UserDTO `json:"body"`
+	Body UserDTO `json:"body" validate:"required"`
 }
 
 func (e *UsersResource) Create(ctx context.Context, in *createUserInput) (*UserDTO, error) {
@@ -174,8 +168,8 @@ func (e *UsersResource) createUser(ctx context.Context, u UserDTO) (*UserDTO, er
 }
 
 type updateUserInput struct {
-	ID   string  `path:"id"`
-	Body UserDTO `json:"body"`
+	ID   string  `path:"id"   validate:"required"`
+	Body UserDTO `json:"body" validate:"required"`
 }
 
 func (e *UsersResource) Update(ctx context.Context, in *updateUserInput) (*UserDTO, error) {
@@ -183,14 +177,8 @@ func (e *UsersResource) Update(ctx context.Context, in *updateUserInput) (*UserD
 		return nil, err
 	}
 	id := strings.TrimSpace(in.ID)
-	if id == "" {
-		return nil, httpx.NewError(422, "validation")
-	}
 	email := strings.TrimSpace(in.Body.Email)
 	name := strings.TrimSpace(in.Body.Name)
-	if email == "" || name == "" {
-		return nil, httpx.NewError(422, "validation")
-	}
 	roleIDs := make([]domain.RoleID, 0, len(in.Body.RoleIDs))
 	for _, rid := range in.Body.RoleIDs {
 		rid = strings.TrimSpace(rid)
@@ -241,4 +229,3 @@ func (e *UsersResource) DeleteByID(ctx context.Context, in *userIDPath) (*struct
 }
 
 // NOTE: role link operations moved into domain repository/service layer.
-

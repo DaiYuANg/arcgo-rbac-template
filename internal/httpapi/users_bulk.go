@@ -43,12 +43,7 @@ type idsQuery struct {
 	ID string `query:"id"`
 }
 
-type usersListOrManyInput struct {
-	idsQuery
-	usersListInput
-}
-
-func (e *UsersResource) ListOrGetMany(ctx context.Context, in *usersListOrManyInput) (*PageResponse[UserDTO], error) {
+func (e *UsersResource) ListOrGetMany(ctx context.Context, in *usersListInput) (*PageResponse[UserDTO], error) {
 	if strings.TrimSpace(in.ID) != "" {
 		items, err := e.GetMany(ctx, &idsQuery{ID: in.ID})
 		if err != nil {
@@ -65,7 +60,7 @@ func (e *UsersResource) ListOrGetMany(ctx context.Context, in *usersListOrManyIn
 			PageSize: pageSize,
 		}, nil
 	}
-	return e.List(ctx, &in.usersListInput)
+	return e.List(ctx, in)
 }
 
 func loOrEmpty(items *[]UserDTO) []UserDTO {

@@ -44,7 +44,7 @@ func (e *AuthEndpoint) Register(registrar httpx.Registrar) {
 }
 
 type loginInput struct {
-	Body LoginRequest `json:"body"`
+	Body LoginRequest `json:"body" validate:"required"`
 }
 
 type tokenWithCookieOutput struct {
@@ -58,9 +58,6 @@ func (e *AuthEndpoint) Login(ctx context.Context, in *loginInput) (*tokenWithCoo
 	}
 	username := strings.TrimSpace(in.Body.Username)
 	password := in.Body.Password
-	if username == "" || strings.TrimSpace(password) == "" {
-		return nil, httpx.NewError(400, "invalid_credentials")
-	}
 
 	result, err := e.engine.Check(ctx, authn.PasswordCredential{Username: username, Password: password})
 	if err != nil || result.Principal == nil {

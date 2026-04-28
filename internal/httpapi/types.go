@@ -7,8 +7,8 @@ type HealthResponse struct {
 }
 
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username string `json:"username" validate:"required"`
+	Password string `json:"password" validate:"required"`
 }
 
 type TokenResponse struct {
@@ -36,32 +36,32 @@ type PageResponse[T any] struct {
 }
 
 type UserDTO struct {
-	ID        string   `json:"id"`
-	Email     string   `json:"email"`
-	Name      string   `json:"name"`
+	ID        string   `json:"id"                  validate:"required"`
+	Email     string   `json:"email"               validate:"required,email"`
+	Name      string   `json:"name"                validate:"required"`
 	RoleIDs   []string `json:"roleIds,omitempty"`
 	CreatedAt string   `json:"createdAt,omitempty"`
 }
 
 type RoleDTO struct {
-	ID                 string   `json:"id"`
-	Name               string   `json:"name"`
+	ID                 string   `json:"id"                           validate:"required"`
+	Name               string   `json:"name"                         validate:"required"`
 	Description        string   `json:"description,omitempty"`
 	PermissionGroupIDs []string `json:"permissionGroupIds,omitempty"`
 	CreatedAt          string   `json:"createdAt,omitempty"`
 }
 
 type PermissionDTO struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	Code      string  `json:"code"`
+	ID        string  `json:"id"                  validate:"required"`
+	Name      string  `json:"name"                validate:"required"`
+	Code      string  `json:"code"                validate:"required"`
 	GroupID   *string `json:"groupId,omitempty"`
 	CreatedAt string  `json:"createdAt,omitempty"`
 }
 
 type PermissionGroupDTO struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
+	ID          string `json:"id"                    validate:"required"`
+	Name        string `json:"name"                  validate:"required"`
 	Description string `json:"description,omitempty"`
 	CreatedAt   string `json:"createdAt,omitempty"`
 }
@@ -94,4 +94,3 @@ type DashboardStatsResponse struct {
 		Count int64  `json:"count"`
 	} `json:"permissionGroups"`
 }
-

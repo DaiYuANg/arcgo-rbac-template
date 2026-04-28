@@ -5,10 +5,10 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/arcgolabs/authx"
-	"github.com/arcgolabs/httpx"
 	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
+	"github.com/arcgolabs/authx"
+	"github.com/arcgolabs/httpx"
 )
 
 type RolesResource struct {
@@ -34,8 +34,8 @@ func (e *RolesResource) EndpointSpec() httpx.EndpointSpec {
 
 type rolesListInput struct {
 	ID       string `query:"id"`
-	Page     int64  `query:"page"`
-	PageSize int64  `query:"pageSize"`
+	Page     int64  `minimum:"1"       query:"page"     validate:"required_without=ID,omitempty,min=1"`
+	PageSize int64  `minimum:"1"       query:"pageSize" validate:"required_without=ID,omitempty,min=1"`
 	Q        string `query:"q"`
 	Sort     string `query:"sort"`
 	Order    string `query:"order"`
@@ -66,15 +66,12 @@ func (e *RolesResource) ListOrGetMany(ctx context.Context, in *rolesListInput) (
 }
 
 func (e *RolesResource) List(ctx context.Context, in *rolesListInput) (*PageResponse[RoleDTO], error) {
-	if in.Page <= 0 || in.PageSize <= 0 {
-		return nil, httpx.NewError(400, "validation", errors.New("page and pageSize are required"))
-	}
 	page, err := e.svc.List(ctx, domain.RolesListQuery{
 		PageParams: domain.PageParams{Page: in.Page, PageSize: in.PageSize},
-		Q:         strings.TrimSpace(in.Q),
-		Sort:      strings.TrimSpace(in.Sort),
-		Order:     domain.NormalizeOrder(in.Order),
-		NameLike:  strings.TrimSpace(in.NameLike),
+		Q:          strings.TrimSpace(in.Q),
+		Sort:       strings.TrimSpace(in.Sort),
+		Order:      domain.NormalizeOrder(in.Order),
+		NameLike:   strings.TrimSpace(in.NameLike),
 	})
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
@@ -132,7 +129,7 @@ func (e *RolesResource) GetByID(ctx context.Context, in *userIDPath) (*RoleDTO, 
 }
 
 type createRoleInput struct {
-	Body RoleDTO `json:"body"`
+	Body RoleDTO `json:"body" validate:"required"`
 }
 
 func (e *RolesResource) Create(ctx context.Context, in *createRoleInput) (*RoleDTO, error) {
@@ -175,8 +172,8 @@ func (e *RolesResource) Create(ctx context.Context, in *createRoleInput) (*RoleD
 }
 
 type updateRoleInput struct {
-	ID   string `path:"id"`
-	Body RoleDTO `json:"body"`
+	ID   string  `path:"id"   validate:"required"`
+	Body RoleDTO `json:"body" validate:"required"`
 }
 
 func (e *RolesResource) Update(ctx context.Context, in *updateRoleInput) (*RoleDTO, error) {
@@ -186,9 +183,6 @@ func (e *RolesResource) Update(ctx context.Context, in *updateRoleInput) (*RoleD
 	id := strings.TrimSpace(in.ID)
 	name := strings.TrimSpace(in.Body.Name)
 	desc := strings.TrimSpace(in.Body.Description)
-	if id == "" || name == "" {
-		return nil, httpx.NewError(422, "validation")
-	}
 	groupIDs := make([]domain.PermissionGroupID, 0, len(in.Body.PermissionGroupIDs))
 	for _, gid := range in.Body.PermissionGroupIDs {
 		gid = strings.TrimSpace(gid)

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/arcgolabs/authx"
-	"github.com/arcgolabs/httpx"
 	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
+	"github.com/arcgolabs/authx"
+	"github.com/arcgolabs/httpx"
 )
 
 type PermissionGroupsResource struct {
@@ -34,8 +34,8 @@ func (e *PermissionGroupsResource) EndpointSpec() httpx.EndpointSpec {
 
 type pgListInput struct {
 	ID       string `query:"id"`
-	Page     int64  `query:"page"`
-	PageSize int64  `query:"pageSize"`
+	Page     int64  `minimum:"1"       query:"page"     validate:"required_without=ID,omitempty,min=1"`
+	PageSize int64  `minimum:"1"       query:"pageSize" validate:"required_without=ID,omitempty,min=1"`
 	Q        string `query:"q"`
 	Sort     string `query:"sort"`
 	Order    string `query:"order"`
@@ -72,15 +72,12 @@ func (e *PermissionGroupsResource) ListOrGetMany(ctx context.Context, in *pgList
 }
 
 func (e *PermissionGroupsResource) List(ctx context.Context, in *pgListInput) (*PageResponse[PermissionGroupDTO], error) {
-	if in.Page <= 0 || in.PageSize <= 0 {
-		return nil, httpx.NewError(400, "validation", errors.New("page and pageSize are required"))
-	}
 	page, err := e.svc.List(ctx, domain.PermissionGroupsListQuery{
 		PageParams: domain.PageParams{Page: in.Page, PageSize: in.PageSize},
-		Q:         strings.TrimSpace(in.Q),
-		Sort:      strings.TrimSpace(in.Sort),
-		Order:     domain.NormalizeOrder(in.Order),
-		NameLike:  strings.TrimSpace(in.NameLike),
+		Q:          strings.TrimSpace(in.Q),
+		Sort:       strings.TrimSpace(in.Sort),
+		Order:      domain.NormalizeOrder(in.Order),
+		NameLike:   strings.TrimSpace(in.NameLike),
 	})
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
@@ -118,7 +115,9 @@ func (e *PermissionGroupsResource) GetByID(ctx context.Context, in *userIDPath) 
 	return e.Get(ctx, in)
 }
 
-type createPGInput struct{ Body PermissionGroupDTO `json:"body"` }
+type createPGInput struct {
+	Body PermissionGroupDTO `json:"body" validate:"required"`
+}
 
 func (e *PermissionGroupsResource) Create(ctx context.Context, in *createPGInput) (*PermissionGroupDTO, error) {
 	if err := enforce(ctx, e.engine, "permission-groups:write", "/permission-groups"); err != nil {
@@ -148,7 +147,9 @@ func (e *PermissionGroupsResource) Create(ctx context.Context, in *createPGInput
 	return &pg, nil
 }
 
-type createPGBulkInput struct{ Body BulkItems[PermissionGroupDTO] `json:"body"` }
+type createPGBulkInput struct {
+	Body BulkItems[PermissionGroupDTO] `json:"body"`
+}
 
 func (e *PermissionGroupsResource) CreateMany(ctx context.Context, in *createPGBulkInput) (*[]PermissionGroupDTO, error) {
 	out := make([]PermissionGroupDTO, 0, len(in.Body.Items))
@@ -163,8 +164,8 @@ func (e *PermissionGroupsResource) CreateMany(ctx context.Context, in *createPGB
 }
 
 type updatePGInput struct {
-	ID   string `path:"id"`
-	Body PermissionGroupDTO `json:"body"`
+	ID   string             `path:"id"   validate:"required"`
+	Body PermissionGroupDTO `json:"body" validate:"required"`
 }
 
 func (e *PermissionGroupsResource) Update(ctx context.Context, in *updatePGInput) (*PermissionGroupDTO, error) {
@@ -197,7 +198,7 @@ func (e *PermissionGroupsResource) UpdateByID(ctx context.Context, in *updatePGI
 }
 
 type updatePGBulkInput struct {
-	ID   string `query:"id"`
+	ID   string             `query:"id"`
 	Body PermissionGroupDTO `json:"body"`
 }
 
@@ -246,4 +247,3 @@ func (e *PermissionGroupsResource) DeleteMany(ctx context.Context, in *idsQuery)
 	}
 	return &out, nil
 }
-

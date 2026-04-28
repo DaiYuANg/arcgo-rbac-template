@@ -5,10 +5,10 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/arcgolabs/authx"
-	"github.com/arcgolabs/httpx"
 	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
+	"github.com/arcgolabs/authx"
+	"github.com/arcgolabs/httpx"
 )
 
 type PermissionsResource struct {
@@ -34,8 +34,8 @@ func (e *PermissionsResource) EndpointSpec() httpx.EndpointSpec {
 
 type permListInput struct {
 	ID       string `query:"id"`
-	Page     int64  `query:"page"`
-	PageSize int64  `query:"pageSize"`
+	Page     int64  `minimum:"1"       query:"page"     validate:"required_without=ID,omitempty,min=1"`
+	PageSize int64  `minimum:"1"       query:"pageSize" validate:"required_without=ID,omitempty,min=1"`
 	Q        string `query:"q"`
 	Sort     string `query:"sort"`
 	Order    string `query:"order"`
@@ -73,16 +73,13 @@ func (e *PermissionsResource) ListOrGetMany(ctx context.Context, in *permListInp
 }
 
 func (e *PermissionsResource) List(ctx context.Context, in *permListInput) (*PageResponse[PermissionDTO], error) {
-	if in.Page <= 0 || in.PageSize <= 0 {
-		return nil, httpx.NewError(400, "validation", errors.New("page and pageSize are required"))
-	}
 	page, err := e.svc.List(ctx, domain.PermissionsListQuery{
 		PageParams: domain.PageParams{Page: in.Page, PageSize: in.PageSize},
-		Q:         strings.TrimSpace(in.Q),
-		Sort:      strings.TrimSpace(in.Sort),
-		Order:     domain.NormalizeOrder(in.Order),
-		NameLike:  strings.TrimSpace(in.NameLike),
-		CodeLike:  strings.TrimSpace(in.CodeLike),
+		Q:          strings.TrimSpace(in.Q),
+		Sort:       strings.TrimSpace(in.Sort),
+		Order:      domain.NormalizeOrder(in.Order),
+		NameLike:   strings.TrimSpace(in.NameLike),
+		CodeLike:   strings.TrimSpace(in.CodeLike),
 	})
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
@@ -137,7 +134,9 @@ func (e *PermissionsResource) GetByID(ctx context.Context, in *userIDPath) (*Per
 	return e.Get(ctx, in)
 }
 
-type createPermInput struct{ Body PermissionDTO `json:"body"` }
+type createPermInput struct {
+	Body PermissionDTO `json:"body" validate:"required"`
+}
 
 func (e *PermissionsResource) Create(ctx context.Context, in *createPermInput) (*PermissionDTO, error) {
 	p := in.Body
@@ -194,9 +193,9 @@ func (e *PermissionsResource) createPermission(ctx context.Context, p Permission
 	return &p, nil
 }
 
- 
-
-type createPermBulkInput struct{ Body BulkItems[PermissionDTO] `json:"body"` }
+type createPermBulkInput struct {
+	Body BulkItems[PermissionDTO] `json:"body"`
+}
 
 func (e *PermissionsResource) CreateMany(ctx context.Context, in *createPermBulkInput) (*[]PermissionDTO, error) {
 	out := make([]PermissionDTO, 0, len(in.Body.Items))
@@ -211,8 +210,8 @@ func (e *PermissionsResource) CreateMany(ctx context.Context, in *createPermBulk
 }
 
 type updatePermInput struct {
-	ID   string `path:"id"`
-	Body PermissionDTO `json:"body"`
+	ID   string        `path:"id"   validate:"required"`
+	Body PermissionDTO `json:"body" validate:"required"`
 }
 
 func (e *PermissionsResource) Update(ctx context.Context, in *updatePermInput) (*PermissionDTO, error) {
