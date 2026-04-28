@@ -80,8 +80,10 @@ func (r *PermissionGroupRepo) List(ctx context.Context, q domain.PermissionGroup
 
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
-		From(PermissionGroups).
-		Where(where)
+		From(PermissionGroups)
+	if where != nil {
+		countQuery = countQuery.Where(where)
+	}
 	total, err := countTotal(ctx, r.core, countQuery)
 	if err != nil {
 		return domain.Page[domain.PermissionGroup]{}, fmt.Errorf("permission group list count: %w", err)
@@ -102,9 +104,11 @@ func (r *PermissionGroupRepo) List(ctx context.Context, q domain.PermissionGroup
 	listQuery := querydsl.
 		Select(PermissionGroups.ID, PermissionGroups.Name, PermissionGroups.Description, PermissionGroups.CreatedAt).
 		From(PermissionGroups).
-		Where(where).
 		PageBy(int(q.Page), int(q.PageSize)).
 		OrderBy(ord)
+	if where != nil {
+		listQuery = listQuery.Where(where)
+	}
 
 	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
 	if err != nil {

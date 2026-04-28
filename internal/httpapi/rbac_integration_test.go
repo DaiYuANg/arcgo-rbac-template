@@ -1,3 +1,4 @@
+//nolint:testpackage // Integration tests need unexported endpoint/test setup helpers.
 package httpapi
 
 import (

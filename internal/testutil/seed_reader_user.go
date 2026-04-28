@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -32,7 +33,11 @@ func SeedReaderUserAlice(tb testing.TB, sqlDB *sql.DB, plainPassword string) {
 	if err != nil {
 		tb.Fatalf("begin tx: %v", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			tb.Fatalf("rollback: %v", rbErr)
+		}
+	}()
 
 	exec := func(query string, args ...any) {
 		tb.Helper()
@@ -60,7 +65,7 @@ func SeedReaderUserAlice(tb testing.TB, sqlDB *sql.DB, plainPassword string) {
 	}
 }
 
-// SeedUserNoPerm inserts a second user authenticated in auth_users without users:read.
+// SeedDeniedUser inserts a second user authenticated in auth_users without users:read.
 func SeedDeniedUser(tb testing.TB, sqlDB *sql.DB, username, plainPassword string) {
 	tb.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(plainPassword), bcrypt.MinCost)
@@ -74,7 +79,11 @@ func SeedDeniedUser(tb testing.TB, sqlDB *sql.DB, username, plainPassword string
 	if err != nil {
 		tb.Fatalf("begin tx: %v", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			tb.Fatalf("rollback: %v", rbErr)
+		}
+	}()
 
 	exec := func(query string, args ...any) {
 		tb.Helper()

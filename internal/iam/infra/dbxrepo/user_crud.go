@@ -89,8 +89,10 @@ func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Pa
 
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
-		From(Users).
-		Where(where)
+		From(Users)
+	if where != nil {
+		countQuery = countQuery.Where(where)
+	}
 	total, err := countTotal(ctx, r.core, countQuery)
 	if err != nil {
 		return domain.Page[domain.User]{}, fmt.Errorf("user list count: %w", err)
@@ -111,9 +113,11 @@ func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Pa
 	listQuery := querydsl.
 		Select(Users.ID, Users.Email, Users.Name, Users.CreatedAt).
 		From(Users).
-		Where(where).
 		PageBy(int(q.Page), int(q.PageSize)).
 		OrderBy(ord)
+	if where != nil {
+		listQuery = listQuery.Where(where)
+	}
 
 	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
 	if err != nil {

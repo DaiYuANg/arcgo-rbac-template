@@ -80,8 +80,10 @@ func (r *RoleRepo) List(ctx context.Context, q domain.RolesListQuery) (domain.Pa
 
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
-		From(Roles).
-		Where(where)
+		From(Roles)
+	if where != nil {
+		countQuery = countQuery.Where(where)
+	}
 	total, err := countTotal(ctx, r.core, countQuery)
 	if err != nil {
 		return domain.Page[domain.Role]{}, fmt.Errorf("role list count: %w", err)
@@ -102,9 +104,11 @@ func (r *RoleRepo) List(ctx context.Context, q domain.RolesListQuery) (domain.Pa
 	listQuery := querydsl.
 		Select(Roles.ID, Roles.Name, Roles.Description, Roles.CreatedAt).
 		From(Roles).
-		Where(where).
 		PageBy(int(q.Page), int(q.PageSize)).
 		OrderBy(ord)
+	if where != nil {
+		listQuery = listQuery.Where(where)
+	}
 
 	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
 	if err != nil {

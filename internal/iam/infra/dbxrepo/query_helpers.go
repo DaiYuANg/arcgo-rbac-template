@@ -9,12 +9,13 @@ import (
 	"github.com/arcgolabs/dbx/querydsl"
 )
 
-// predicatesAnd folds filters with AND; an empty slice means no filter (match every row).
+// predicatesAnd folds filters with AND; an empty slice returns nil (no WHERE clause).
 func predicatesAnd(predicates []querydsl.Predicate) querydsl.Predicate {
-	if len(predicates) == 0 {
-		return querydsl.Compare(querydsl.Value(1), querydsl.OpEq, 1)
+	items := querydsl.CompactPredicates(predicates)
+	if items.Len() == 0 {
+		return nil
 	}
-	return querydsl.And(predicates...)
+	return querydsl.AndList(items)
 }
 
 type oneStringRow struct {

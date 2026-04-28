@@ -13,6 +13,7 @@ import (
 	"github.com/arcgolabs/dbx"
 	dbxmigrate "github.com/arcgolabs/dbx/migrate"
 
+	// Register modernc SQLite driver for db.Open("sqlite", ...).
 	_ "modernc.org/sqlite"
 )
 
@@ -38,12 +39,16 @@ func MustMigratingDB(tb testing.TB) (*dbx.DB, db.Dialect, func()) {
 	})
 	mfs, dir := migrations.Filesystem()
 	if _, err = runner.UpSQL(ctx, dbxmigrate.FileSource{FS: mfs, Dir: dir}); err != nil {
-		_ = core.Close()
+		if closeErr := core.Close(); closeErr != nil {
+			tb.Errorf("close db after migrate failure: %v", closeErr)
+		}
 		tb.Fatalf("migrate: %v", err)
 	}
 
 	cleanup := func() {
-		_ = core.Close()
+		if closeErr := core.Close(); closeErr != nil {
+			tb.Errorf("close db: %v", closeErr)
+		}
 	}
 
 	return core, dialect, cleanup

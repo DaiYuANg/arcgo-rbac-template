@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -44,7 +45,7 @@ type FiberResponse struct {
 // FiberRequest runs a Fiber app request without JSON marshal (use FiberDoJSON when sending JSON structs).
 func FiberRequest(tb testing.TB, app *fiber.App, method, path string, body io.Reader, header map[string]string) FiberResponse {
 	tb.Helper()
-	req := httptest.NewRequest(method, path, body)
+	req := httptest.NewRequestWithContext(context.Background(), method, path, body)
 	req.Header.Set("Content-Type", "application/json")
 	setRequestBodyLength(req, body)
 	for k, v := range header {
@@ -57,7 +58,11 @@ func FiberRequest(tb testing.TB, app *fiber.App, method, path string, body io.Re
 	if err != nil {
 		tb.Fatalf("%s %s: %v", method, path, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			tb.Errorf("close response body: %v", closeErr)
+		}
+	}()
 
 	got, err := io.ReadAll(resp.Body)
 	if err != nil {

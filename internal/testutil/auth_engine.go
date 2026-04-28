@@ -1,3 +1,4 @@
+// Package testutil provides helpers for integration/unit testing.
 package testutil
 
 import (

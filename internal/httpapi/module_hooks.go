@@ -34,11 +34,11 @@ func wireFiberBinders(app *fiber.App, binders collectionx.List[FiberBinder]) {
 	})
 }
 
-func wireHTTPEndpoints(server httpx.ServerRuntime, endpoints collectionx.List[Endpoint]) {
+func wireHTTPEndpoints(server httpx.ServerRuntime, endpoints collectionx.List[httpx.Endpoint]) {
 	if endpoints == nil {
 		return
 	}
-	endpoints.Range(func(_ int, ep Endpoint) bool {
+	endpoints.Range(func(_ int, ep httpx.Endpoint) bool {
 		if ep != nil {
 			server.Register(ep)
 		}

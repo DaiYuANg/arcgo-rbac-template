@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/arcgolabs/authx"
@@ -9,25 +11,49 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+var errUnauthorized = errors.New("unauthorized")
+
+func unauthorizedJSON(c *fiber.Ctx) error {
+	if err := c.Status(401).JSON(fiber.Map{"message": "unauthorized"}); err != nil {
+		return fmt.Errorf("write unauthorized response: %w", err)
+	}
+	return nil
+}
+
+func parseBearerToken(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "Bearer ") {
+		return "", errUnauthorized
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(raw, "Bearer "))
+	if token == "" {
+		return "", errUnauthorized
+	}
+	return token, nil
+}
+
+func authContext(c *fiber.Ctx) context.Context {
+	ctx := c.UserContext()
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
 func requireAuthFiber(engine *authx.Engine) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		ctx := c.UserContext()
-		if ctx == nil {
-			ctx = context.Background()
+		if engine == nil {
+			return c.Status(500).JSON(fiber.Map{"message": "auth_engine_missing"})
 		}
-
-		raw := strings.TrimSpace(c.Get("Authorization"))
-		if !strings.HasPrefix(raw, "Bearer ") {
-			return c.Status(401).JSON(fiber.Map{"message": "unauthorized"})
-		}
-		token := strings.TrimSpace(strings.TrimPrefix(raw, "Bearer "))
-		if token == "" {
-			return c.Status(401).JSON(fiber.Map{"message": "unauthorized"})
+		ctx := authContext(c)
+		token, err := parseBearerToken(c.Get("Authorization"))
+		if err != nil {
+			return unauthorizedJSON(c)
 		}
 
 		result, err := engine.Check(ctx, authjwt.NewTokenCredential(token))
 		if err != nil || result.Principal == nil {
-			return c.Status(401).JSON(fiber.Map{"message": "unauthorized"})
+			return unauthorizedJSON(c)
 		}
 
 		c.SetUserContext(authx.WithPrincipal(ctx, result.Principal))
@@ -37,23 +63,18 @@ func requireAuthFiber(engine *authx.Engine) fiber.Handler {
 
 func requirePermissionFiber(engine *authx.Engine, action, resource string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		ctx := c.UserContext()
-		if ctx == nil {
-			ctx = context.Background()
+		if engine == nil {
+			return c.Status(500).JSON(fiber.Map{"message": "auth_engine_missing"})
 		}
-
-		raw := strings.TrimSpace(c.Get("Authorization"))
-		if !strings.HasPrefix(raw, "Bearer ") {
-			return c.Status(401).JSON(fiber.Map{"message": "unauthorized"})
-		}
-		token := strings.TrimSpace(strings.TrimPrefix(raw, "Bearer "))
-		if token == "" {
-			return c.Status(401).JSON(fiber.Map{"message": "unauthorized"})
+		ctx := authContext(c)
+		token, err := parseBearerToken(c.Get("Authorization"))
+		if err != nil {
+			return unauthorizedJSON(c)
 		}
 
 		result, err := engine.Check(ctx, authjwt.NewTokenCredential(token))
 		if err != nil || result.Principal == nil {
-			return c.Status(401).JSON(fiber.Map{"message": "unauthorized"})
+			return unauthorizedJSON(c)
 		}
 
 		decision, err := engine.Can(ctx, authx.AuthorizationModel{
