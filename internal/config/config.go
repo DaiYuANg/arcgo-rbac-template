@@ -1,6 +1,8 @@
+// Package config loads and validates runtime configuration for the template.
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -208,7 +210,7 @@ func Load() (Config, error) {
 	}
 
 	if cfg.Auth.JWTSecret == "" && !cfg.Auth.AllowInsecureDev {
-		return Config{}, fmt.Errorf("JWT_SECRET is required when ALLOW_INSECURE_DEV=false")
+		return Config{}, errors.New("JWT_SECRET is required when ALLOW_INSECURE_DEV=false")
 	}
 	if cfg.Auth.JWTSecret == "" && cfg.Auth.AllowInsecureDev {
 		cfg.Auth.JWTSecret = "dev-secret-change-me"

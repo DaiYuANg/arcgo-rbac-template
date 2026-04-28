@@ -1,8 +1,10 @@
+// Package authz implements authx authorization integration for the template.
 package authz
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/application"
@@ -41,7 +43,7 @@ func (a *IAMAuthorizer) Authorize(ctx context.Context, input authx.Authorization
 
 	decision, err := a.iam.Can(ctx, domain.UserID(uid), p.Roles.Values(), domain.PermissionID(perm), input.Resource)
 	if err != nil {
-		return authx.Decision{Allowed: false, Reason: "iam error"}, err
+		return authx.Decision{Allowed: false, Reason: "iam error"}, fmt.Errorf("iam authorize: %w", err)
 	}
 
 	return authx.Decision{

@@ -9,8 +9,10 @@ import (
 	"github.com/arcgolabs/authx"
 	"github.com/DaiYuANg/arcgo/kvx"
 	"github.com/arcgolabs/dbx"
+	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/httpx"
-	"github.com/danielgtaylor/huma/v2"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
 )
 
 type UsersResource struct {
@@ -49,14 +51,16 @@ type usersListInput struct {
 
 func (e *UsersResource) Register(registrar httpx.Registrar) {
 	g := registrar.Scope()
-	httpx.MustGroupGet(g, "", e.ListOrGetMany, func(op *huma.Operation) { op.Summary = "List / Get many" })
-	httpx.MustGroupGet(g, "/{id}", e.Get, func(op *huma.Operation) { op.Summary = "Detail" })
-	httpx.MustGroupPost(g, "", e.Create, func(op *huma.Operation) { op.Summary = "Create" })
-	httpx.MustGroupPost(g, "/bulk", e.CreateMany, func(op *huma.Operation) { op.Summary = "Create many" })
-	httpx.MustGroupPatch(g, "/{id}", e.Update, func(op *huma.Operation) { op.Summary = "Update" })
-	httpx.MustGroupPatch(g, "/bulk", e.UpdateMany, func(op *huma.Operation) { op.Summary = "Update many" })
-	httpx.MustGroupDelete(g, "/{id}", e.Delete, func(op *huma.Operation) { op.Summary = "Delete" })
-	httpx.MustGroupDelete(g, "", e.DeleteManyOrGetMany, func(op *huma.Operation) { op.Summary = "Delete many / Get many" })
+	httpx.MustAuto(g,
+		httpx.Auto(e.ListOrGetMany),
+		httpx.Auto(e.GetByID),
+		httpx.Auto(e.Create),
+		httpx.Auto(e.UpdateByID),
+		httpx.Auto(e.DeleteByID),
+	)
+	httpx.MustGroupPost(g, "/bulk", e.CreateMany)
+	httpx.MustGroupPatch(g, "/bulk", e.UpdateMany)
+	httpx.MustGroupDelete(g, "", e.DeleteManyOrGetMany)
 }
 
 func (e *UsersResource) List(ctx context.Context, in *usersListInput) (*PageResponse[UserDTO], error) {
@@ -67,69 +71,107 @@ func (e *UsersResource) List(ctx context.Context, in *usersListInput) (*PageResp
 		return nil, httpx.NewError(400, "validation", fmt.Errorf("page and pageSize are required"))
 	}
 
-	where := " WHERE 1=1"
-	args := []any{}
-	addLike := func(field string, value string) {
-		v := strings.TrimSpace(value)
-		if v == "" {
-			return
-		}
-		args = append(args, "%"+v+"%")
-		where += fmt.Sprintf(" AND %s LIKE %s", field, bind(e.core, len(args)))
+	type countRow struct {
+		Total int64 `dbx:"total"`
 	}
-	addLike("name", in.NameLike)
-	addLike("email", in.EmailLike)
-	addLike("name", in.Q)
-	addLike("email", in.Q)
-
-	orderSQL, err := orderBy(in.Sort, in.Order, map[string]string{
-		"id":        "id",
-		"email":     "email",
-		"name":      "name",
-		"createdAt": "created_at",
-	})
-	if err != nil {
-		return nil, httpx.NewError(400, "validation", err)
+	type userRow struct {
+		ID        string `dbx:"id"`
+		Email     string `dbx:"email"`
+		Name      string `dbx:"name"`
+		CreatedAt int64  `dbx:"created_at"`
 	}
 
-	countSQL := "SELECT COUNT(1) FROM iam_users" + where
-	var total int64
-	if err := e.core.SQLDB().QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
-		return nil, httpx.NewError(500, "unknown", err)
+	predicates := make([]querydsl.Predicate, 0, 4)
+	if v := strings.TrimSpace(in.NameLike); v != "" {
+		predicates = append(predicates, querydsl.Like(dbxrepo.Users.Name, "%"+v+"%"))
 	}
+	if v := strings.TrimSpace(in.EmailLike); v != "" {
+		predicates = append(predicates, querydsl.Like(dbxrepo.Users.Email, "%"+v+"%"))
+	}
+	if v := strings.TrimSpace(in.Q); v != "" {
+		predicates = append(predicates, querydsl.Or(
+			querydsl.Like(dbxrepo.Users.Name, "%"+v+"%"),
+			querydsl.Like(dbxrepo.Users.Email, "%"+v+"%"),
+		))
+	}
+	where := querydsl.And(predicates...)
 
-	offset := (in.Page - 1) * in.PageSize
-	args2 := append([]any{}, args...)
-	args2 = append(args2, in.PageSize, offset)
-	limitBind := bind(e.core, len(args2)-1)
-	offsetBind := bind(e.core, len(args2))
-
-	listSQL := "SELECT id, email, name, created_at FROM iam_users" + where + orderSQL +
-		" LIMIT " + limitBind + " OFFSET " + offsetBind
-	rows, err := e.core.SQLDB().QueryContext(ctx, listSQL, args2...)
+	countQuery := querydsl.
+		Select(querydsl.CountAll().As("total")).
+		From(dbxrepo.Users).
+		Where(where)
+	countItems, err := dbx.QueryAll(ctx, e.core, countQuery, mapper.MustStructMapper[countRow]())
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	defer rows.Close()
+	total := int64(0)
+	if countItems != nil && countItems.Len() > 0 {
+		first, _ := countItems.Get(0)
+		total = first.Total
+	}
 
-	items := make([]UserDTO, 0, in.PageSize)
-	for rows.Next() {
-		var id, email, name string
-		var createdAt int64
-		if err := rows.Scan(&id, &email, &name, &createdAt); err != nil {
-			return nil, httpx.NewError(500, "unknown", err)
+	listQuery := querydsl.
+		Select(dbxrepo.Users.ID, dbxrepo.Users.Email, dbxrepo.Users.Name, dbxrepo.Users.CreatedAt).
+		From(dbxrepo.Users).
+		Where(where).
+		PageBy(int(in.Page), int(in.PageSize))
+
+	sort := strings.TrimSpace(in.Sort)
+	order := strings.ToLower(strings.TrimSpace(in.Order))
+	if order == "" {
+		order = "asc"
+	}
+	desc := order == "desc"
+	if sort != "" {
+		var ord querydsl.Order
+		switch sort {
+		case "id":
+			if desc {
+				ord = dbxrepo.Users.ID.Desc()
+			} else {
+				ord = dbxrepo.Users.ID.Asc()
+			}
+		case "email":
+			if desc {
+				ord = dbxrepo.Users.Email.Desc()
+			} else {
+				ord = dbxrepo.Users.Email.Asc()
+			}
+		case "name":
+			if desc {
+				ord = dbxrepo.Users.Name.Desc()
+			} else {
+				ord = dbxrepo.Users.Name.Asc()
+			}
+		case "createdAt":
+			if desc {
+				ord = dbxrepo.Users.CreatedAt.Desc()
+			} else {
+				ord = dbxrepo.Users.CreatedAt.Asc()
+			}
+		default:
+			return nil, httpx.NewError(400, "validation", fmt.Errorf("invalid sort field: %s", sort))
 		}
-		items = append(items, UserDTO{
-			ID:        id,
-			Email:     email,
-			Name:      name,
-			CreatedAt: unixMilliToRFC3339(createdAt),
+		listQuery = listQuery.OrderBy(ord)
+	}
+
+	rows, err := dbx.QueryAll(ctx, e.core, listQuery, mapper.MustStructMapper[userRow]())
+	if err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
+
+	items := make([]UserDTO, 0, int(in.PageSize))
+	if rows != nil {
+		rows.Range(func(_ int, r userRow) bool {
+			items = append(items, UserDTO{
+				ID:        r.ID,
+				Email:     r.Email,
+				Name:      r.Name,
+				CreatedAt: unixMilliToRFC3339(r.CreatedAt),
+			})
+			return true
 		})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, httpx.NewError(500, "unknown", err)
-	}
-
 	return &PageResponse[UserDTO]{
 		Items:    items,
 		Total:    total,
@@ -157,8 +199,15 @@ func (e *UsersResource) Get(ctx context.Context, in *userIDPath) (*UserDTO, erro
 	if err := row.Scan(&id, &email, &name, &createdAt); err != nil {
 		return nil, httpx.NewError(404, "not_found", err)
 	}
-	roleIDs, _ := e.listUserRoleIDs(ctx, id)
+	roleIDs, err := e.listUserRoleIDs(ctx, id)
+	if err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
 	return &UserDTO{ID: id, Email: email, Name: name, RoleIDs: roleIDs, CreatedAt: unixMilliToRFC3339(createdAt)}, nil
+}
+
+func (e *UsersResource) GetByID(ctx context.Context, in *userIDPath) (*UserDTO, error) {
+	return e.Get(ctx, in)
 }
 
 type createUserInput struct {
@@ -166,33 +215,50 @@ type createUserInput struct {
 }
 
 func (e *UsersResource) Create(ctx context.Context, in *createUserInput) (*UserDTO, error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
-	if err := enforce(ctx, e.engine, "users:write", "/users"); err != nil {
+	u := in.Body
+	if err := normalizeUserCreate(&u); err != nil {
 		return nil, err
 	}
-	u := in.Body
+	return e.createUser(ctx, u)
+}
+
+func normalizeUserCreate(u *UserDTO) error {
+	if u == nil {
+		return httpx.NewError(422, "validation")
+	}
 	u.ID = strings.TrimSpace(u.ID)
 	u.Email = strings.TrimSpace(u.Email)
 	u.Name = strings.TrimSpace(u.Name)
-	if u.ID == "" || u.Email == "" || u.Name == "" {
-		return nil, httpx.NewError(422, "validation")
+	if u.Email == "" || u.Name == "" {
+		return httpx.NewError(422, "validation")
 	}
-	now := nowUnixMilli()
-	q := fmt.Sprintf(
-		"INSERT INTO iam_users (id, email, name, created_at) VALUES (%s,%s,%s,%s)",
-		bind(e.core, 1), bind(e.core, 2), bind(e.core, 3), bind(e.core, 4),
-	)
-	if _, err := e.core.SQLDB().ExecContext(ctx, q, u.ID, u.Email, u.Name, now); err != nil {
+	return nil
+}
+
+func (e *UsersResource) createUser(ctx context.Context, u UserDTO) (*UserDTO, error) {
+	now, err := nowAndEnforce(ctx, e.core, e.engine, "users:write", "/users")
+	if err != nil {
+		return nil, err
+	}
+
+	ent := dbxrepo.User{
+		ID:        u.ID,
+		Email:     u.Email,
+		Name:      u.Name,
+		CreatedAt: now,
+	}
+	if err := repoCreate(ctx, e.core, dbxrepo.Users, &ent); err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
+	u.ID = ent.ID
 	if err := e.replaceUserRoles(ctx, u.ID, u.RoleIDs); err != nil {
 		return nil, err
 	}
 	u.CreatedAt = unixMilliToRFC3339(now)
 	return &u, nil
 }
+
+
 
 type createUsersBulkInput struct {
 	Body BulkItems[UserDTO] `json:"body"`
@@ -245,6 +311,10 @@ func (e *UsersResource) Update(ctx context.Context, in *updateUserInput) (*UserD
 	return dto, nil
 }
 
+func (e *UsersResource) UpdateByID(ctx context.Context, in *updateUserInput) (*UserDTO, error) {
+	return e.Update(ctx, in)
+}
+
 type updateUsersBulkInput struct {
 	ID   string  `query:"id"`
 	Body UserDTO `json:"body"`
@@ -274,11 +344,17 @@ func (e *UsersResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, 
 	if id == "" {
 		return nil, httpx.NewError(422, "validation")
 	}
-	_, _ = e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_user_roles WHERE user_id=%s", bind(e.core, 1)), id)
+	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_user_roles WHERE user_id=%s", bind(e.core, 1)), id); err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
 	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_users WHERE id=%s", bind(e.core, 1)), id); err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
 	return &struct{}{}, nil
+}
+
+func (e *UsersResource) DeleteByID(ctx context.Context, in *userIDPath) (*struct{}, error) {
+	return e.Delete(ctx, in)
 }
 
 type idsQuery struct {
@@ -330,7 +406,9 @@ func (e *UsersResource) DeleteManyOrGetMany(ctx context.Context, in *idsQuery) (
 		if err == nil && item != nil {
 			out = append(out, *item)
 		}
-		_, _ = e.Delete(ctx, &userIDPath{ID: id})
+		if _, err := e.Delete(ctx, &userIDPath{ID: id}); err != nil {
+			return nil, err
+		}
 	}
 	return &out, nil
 }
@@ -369,16 +447,23 @@ func (e *UsersResource) listUserRoleIDs(ctx context.Context, userID string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []string{}
 	for rows.Next() {
 		var rid string
 		if err := rows.Scan(&rid); err != nil {
+			closeRows(rows)
 			return nil, err
 		}
 		out = append(out, rid)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		closeRows(rows)
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (e *UsersResource) replaceUserRoles(ctx context.Context, userID string, roleIDs []string) error {

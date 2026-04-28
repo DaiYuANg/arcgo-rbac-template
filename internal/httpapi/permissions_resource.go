@@ -7,8 +7,11 @@ import (
 
 	"github.com/arcgolabs/authx"
 	"github.com/arcgolabs/dbx"
+	"github.com/arcgolabs/dbx/column"
+	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/httpx"
-	"github.com/danielgtaylor/huma/v2"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
 )
 
 type PermissionsResource struct {
@@ -45,14 +48,16 @@ type permListInput struct {
 
 func (e *PermissionsResource) Register(registrar httpx.Registrar) {
 	g := registrar.Scope()
-	httpx.MustGroupGet(g, "", e.ListOrGetMany, func(op *huma.Operation) { op.Summary = "List / Get many" })
-	httpx.MustGroupGet(g, "/{id}", e.Get, func(op *huma.Operation) { op.Summary = "Detail" })
-	httpx.MustGroupPost(g, "", e.Create, func(op *huma.Operation) { op.Summary = "Create" })
-	httpx.MustGroupPost(g, "/bulk", e.CreateMany, func(op *huma.Operation) { op.Summary = "Create many" })
-	httpx.MustGroupPatch(g, "/{id}", e.Update, func(op *huma.Operation) { op.Summary = "Update" })
-	httpx.MustGroupPatch(g, "/bulk", e.UpdateMany, func(op *huma.Operation) { op.Summary = "Update many" })
-	httpx.MustGroupDelete(g, "/{id}", e.Delete, func(op *huma.Operation) { op.Summary = "Delete" })
-	httpx.MustGroupDelete(g, "", e.DeleteMany, func(op *huma.Operation) { op.Summary = "Delete many" })
+	httpx.MustAuto(g,
+		httpx.Auto(e.ListOrGetMany),
+		httpx.Auto(e.GetByID),
+		httpx.Auto(e.Create),
+		httpx.Auto(e.UpdateByID),
+		httpx.Auto(e.DeleteByID),
+	)
+	httpx.MustGroupPost(g, "/bulk", e.CreateMany)
+	httpx.MustGroupPatch(g, "/bulk", e.UpdateMany)
+	httpx.MustGroupDelete(g, "", e.DeleteMany)
 }
 
 func (e *PermissionsResource) ListOrGetMany(ctx context.Context, in *permListInput) (*PageResponse[PermissionDTO], error) {
@@ -77,57 +82,82 @@ func (e *PermissionsResource) List(ctx context.Context, in *permListInput) (*Pag
 	if in.Page <= 0 || in.PageSize <= 0 {
 		return nil, httpx.NewError(400, "validation", fmt.Errorf("page and pageSize are required"))
 	}
-	where := " WHERE 1=1"
-	args := []any{}
-	addLike := func(field, value string) {
-		v := strings.TrimSpace(value)
-		if v == "" {
-			return
-		}
-		args = append(args, "%"+v+"%")
-		where += fmt.Sprintf(" AND %s LIKE %s", field, bind(e.core, len(args)))
+
+	type countRow struct {
+		Total int64 `dbx:"total"`
 	}
-	addLike("name", in.NameLike)
-	addLike("code", in.CodeLike)
-	addLike("name", in.Q)
-	addLike("code", in.Q)
-	orderSQL, err := orderBy(in.Sort, in.Order, map[string]string{
-		"id":        "id",
-		"name":      "name",
-		"code":      "code",
-		"createdAt": "created_at",
-	})
+	type permRow struct {
+		ID        string `dbx:"id"`
+		Name      string `dbx:"name"`
+		Code      string `dbx:"code"`
+		CreatedAt int64  `dbx:"created_at"`
+		GroupID   *string `dbx:"group_id"`
+	}
+
+	predicates := make([]querydsl.Predicate, 0, 4)
+	if v := strings.TrimSpace(in.NameLike); v != "" {
+		predicates = append(predicates, querydsl.Like(dbxrepo.Permissions.Name, "%"+v+"%"))
+	}
+	if v := strings.TrimSpace(in.CodeLike); v != "" {
+		predicates = append(predicates, querydsl.Like(dbxrepo.Permissions.Code, "%"+v+"%"))
+	}
+	if v := strings.TrimSpace(in.Q); v != "" {
+		predicates = append(predicates, querydsl.Or(
+			querydsl.Like(dbxrepo.Permissions.Name, "%"+v+"%"),
+			querydsl.Like(dbxrepo.Permissions.Code, "%"+v+"%"),
+		))
+	}
+	where := querydsl.And(predicates...)
+
+	countQuery := querydsl.
+		Select(querydsl.CountAll().As("total")).
+		From(dbxrepo.Permissions).
+		Where(where)
+	countItems, err := dbx.QueryAll(ctx, e.core, countQuery, mapper.MustStructMapper[countRow]())
 	if err != nil {
-		return nil, httpx.NewError(400, "validation", err)
-	}
-	var total int64
-	if err := e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_permissions"+where, args...).Scan(&total); err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	offset := (in.Page - 1) * in.PageSize
-	args2 := append([]any{}, args...)
-	args2 = append(args2, in.PageSize, offset)
-	limitBind := bind(e.core, len(args2)-1)
-	offsetBind := bind(e.core, len(args2))
+	total := int64(0)
+	if countItems != nil && countItems.Len() > 0 {
+		first, _ := countItems.Get(0)
+		total = first.Total
+	}
 
 	// groupId is represented by join-table lookup (0..1 in practice).
-	sqlText := "SELECT p.id, p.name, p.code, p.created_at, g.group_id FROM iam_permissions p " +
-		"LEFT JOIN iam_permission_group_permissions g ON g.perm_id = p.id" +
-		where + orderSQL + " LIMIT " + limitBind + " OFFSET " + offsetBind
-	rows, err := e.core.SQLDB().QueryContext(ctx, sqlText, args2...)
+	joinTable := querydsl.NamedTable("iam_permission_group_permissions")
+	joinPermID := column.Named[string](joinTable, "perm_id")
+	joinGroupID := column.Named[*string](joinTable, "group_id")
+
+	listQuery := querydsl.
+		Select(
+			dbxrepo.Permissions.ID,
+			dbxrepo.Permissions.Name,
+			dbxrepo.Permissions.Code,
+			dbxrepo.Permissions.CreatedAt,
+			joinGroupID.As("group_id"),
+		).
+		From(dbxrepo.Permissions).
+		LeftJoin(joinTable).On(joinPermID.EqColumn(dbxrepo.Permissions.ID)).
+		Where(where).
+		PageBy(int(in.Page), int(in.PageSize))
+
+	rows, err := dbx.QueryAll(ctx, e.core, listQuery, mapper.MustStructMapper[permRow]())
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	defer rows.Close()
-	items := make([]PermissionDTO, 0, in.PageSize)
-	for rows.Next() {
-		var id, name, code string
-		var createdAt int64
-		var groupID *string
-		if err := rows.Scan(&id, &name, &code, &createdAt, &groupID); err != nil {
-			return nil, httpx.NewError(500, "unknown", err)
-		}
-		items = append(items, PermissionDTO{ID: id, Name: name, Code: code, GroupID: groupID, CreatedAt: unixMilliToRFC3339(createdAt)})
+
+	items := make([]PermissionDTO, 0, int(in.PageSize))
+	if rows != nil {
+		rows.Range(func(_ int, r permRow) bool {
+			items = append(items, PermissionDTO{
+				ID:        r.ID,
+				Name:      r.Name,
+				Code:      r.Code,
+				GroupID:   r.GroupID,
+				CreatedAt: unixMilliToRFC3339(r.CreatedAt),
+			})
+			return true
+		})
 	}
 	return &PageResponse[PermissionDTO]{Items: items, Total: total, Page: in.Page, PageSize: in.PageSize}, nil
 }
@@ -148,33 +178,57 @@ func (e *PermissionsResource) Get(ctx context.Context, in *userIDPath) (*Permiss
 	return &PermissionDTO{ID: id, Name: name, Code: code, GroupID: groupID, CreatedAt: unixMilliToRFC3339(createdAt)}, nil
 }
 
+func (e *PermissionsResource) GetByID(ctx context.Context, in *userIDPath) (*PermissionDTO, error) {
+	return e.Get(ctx, in)
+}
+
 type createPermInput struct{ Body PermissionDTO `json:"body"` }
 
 func (e *PermissionsResource) Create(ctx context.Context, in *createPermInput) (*PermissionDTO, error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
-	if err := enforce(ctx, e.engine, "permissions:write", "/permissions"); err != nil {
+	p := in.Body
+	if err := normalizePermissionCreate(&p); err != nil {
 		return nil, err
 	}
-	p := in.Body
+	return e.createPermission(ctx, p)
+}
+
+func normalizePermissionCreate(p *PermissionDTO) error {
+	if p == nil {
+		return httpx.NewError(422, "validation")
+	}
 	p.ID = strings.TrimSpace(p.ID)
 	p.Name = strings.TrimSpace(p.Name)
 	p.Code = strings.TrimSpace(p.Code)
-	if p.ID == "" || p.Name == "" || p.Code == "" {
-		return nil, httpx.NewError(422, "validation")
+	if p.Name == "" || p.Code == "" {
+		return httpx.NewError(422, "validation")
 	}
-	now := nowUnixMilli()
-	q := fmt.Sprintf("INSERT INTO iam_permissions (id, name, code, created_at) VALUES (%s,%s,%s,%s)", bind(e.core, 1), bind(e.core, 2), bind(e.core, 3), bind(e.core, 4))
-	if _, err := e.core.SQLDB().ExecContext(ctx, q, p.ID, p.Name, p.Code, now); err != nil {
+	return nil
+}
+
+func (e *PermissionsResource) createPermission(ctx context.Context, p PermissionDTO) (*PermissionDTO, error) {
+	now, err := nowAndEnforce(ctx, e.core, e.engine, "permissions:write", "/permissions")
+	if err != nil {
+		return nil, err
+	}
+
+	ent := dbxrepo.Permission{
+		ID:        p.ID,
+		Name:      p.Name,
+		Code:      p.Code,
+		CreatedAt: now,
+	}
+	if err := repoCreate(ctx, e.core, dbxrepo.Permissions, &ent); err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
+	p.ID = ent.ID
 	if err := e.setPermissionGroup(ctx, p.ID, p.GroupID); err != nil {
 		return nil, err
 	}
 	p.CreatedAt = unixMilliToRFC3339(now)
 	return &p, nil
 }
+
+ 
 
 type createPermBulkInput struct{ Body BulkItems[PermissionDTO] `json:"body"` }
 
@@ -218,6 +272,10 @@ func (e *PermissionsResource) Update(ctx context.Context, in *updatePermInput) (
 	return e.Get(ctx, &userIDPath{ID: id})
 }
 
+func (e *PermissionsResource) UpdateByID(ctx context.Context, in *updatePermInput) (*PermissionDTO, error) {
+	return e.Update(ctx, in)
+}
+
 type updatePermBulkInput struct {
 	ID   string `query:"id"`
 	Body struct {
@@ -258,11 +316,17 @@ func (e *PermissionsResource) Delete(ctx context.Context, in *userIDPath) (*stru
 		return nil, err
 	}
 	id := strings.TrimSpace(in.ID)
-	_, _ = e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_permission_group_permissions WHERE perm_id=%s", bind(e.core, 1)), id)
+	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_permission_group_permissions WHERE perm_id=%s", bind(e.core, 1)), id); err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
 	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_permissions WHERE id=%s", bind(e.core, 1)), id); err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
 	return &struct{}{}, nil
+}
+
+func (e *PermissionsResource) DeleteByID(ctx context.Context, in *userIDPath) (*struct{}, error) {
+	return e.Delete(ctx, in)
 }
 
 func (e *PermissionsResource) DeleteMany(ctx context.Context, in *idsQuery) (*[]PermissionDTO, error) {
@@ -276,7 +340,9 @@ func (e *PermissionsResource) DeleteMany(ctx context.Context, in *idsQuery) (*[]
 		if err == nil && item != nil {
 			out = append(out, *item)
 		}
-		_, _ = e.Delete(ctx, &userIDPath{ID: id})
+		if _, err := e.Delete(ctx, &userIDPath{ID: id}); err != nil {
+			return nil, err
+		}
 	}
 	return &out, nil
 }

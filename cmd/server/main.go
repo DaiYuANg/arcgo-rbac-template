@@ -25,6 +25,10 @@ import (
 	"github.com/arcgolabs/dbx"
 	adapterfiber "github.com/arcgolabs/httpx/adapter/fiber"
 	"github.com/gofiber/fiber/v2"
+
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "modernc.org/sqlite"
 )
 
 func main() {
@@ -82,9 +86,7 @@ func main() {
 						}
 						return dbxrepo.NewPermissionGroupRepo(h.Core, h.Dialect), nil
 					}),
-					dix.Provider2(func(users domain.UserRepository, roles domain.RoleRepository) *application.Authorizer {
-						return application.NewAuthorizer(users, roles)
-					}),
+					dix.Provider2(application.NewAuthorizer),
 					dix.ProviderErr3(func(cfg config.Config, iamAuthz *application.Authorizer, passwordProvider authx.AuthenticationProvider) (*authx.Engine, error) {
 						engine := authx.NewEngine()
 						if err := engine.RegisterProvider(
@@ -126,14 +128,20 @@ func main() {
 					dix.OnStart3(func(ctx context.Context, cfg config.Config, server httpx.ServerRuntime, _ *fiber.App) error {
 						go func() {
 							slog.Default().Info("listening", "addr", cfg.HTTP.Addr, "stack", "httpx/fiber")
-							_ = server.ListenAndServeContext(ctx, cfg.HTTP.Addr)
+								if err := server.ListenAndServeContext(ctx, cfg.HTTP.Addr); err != nil {
+									slog.Default().Error("server listen failed", "error", err)
+								}
 						}()
 						return nil
 					}),
 					dix.OnStop2(func(_ context.Context, server httpx.ServerRuntime, dbh *DBHandle) error {
-						_ = server.Shutdown()
+							if err := server.Shutdown(); err != nil {
+								slog.Default().Error("server shutdown failed", "error", err)
+							}
 						if dbh != nil && dbh.Core != nil {
-							_ = dbh.Core.Close()
+								if err := dbh.Core.Close(); err != nil {
+									slog.Default().Error("db close failed", "error", err)
+								}
 						}
 						return nil
 					}),
@@ -144,11 +152,11 @@ func main() {
 
 	if err := app.Validate(); err != nil {
 		slog.Default().Error("app validate failed", "error", err)
-		os.Exit(1)
+		return
 	}
 	if err := app.RunContext(rootCtx); err != nil {
 		slog.Default().Error("app run failed", "error", err)
-		os.Exit(1)
+		return
 	}
 }
 

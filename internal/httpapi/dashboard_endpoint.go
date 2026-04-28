@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/arcgolabs/dbx"
@@ -37,13 +38,21 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*DashboardS
 	}
 
 	var totalUsers int64
-	_ = e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_users").Scan(&totalUsers)
+	if err := e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_users").Scan(&totalUsers); err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
 	var totalRoles int64
-	_ = e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_roles").Scan(&totalRoles)
+	if err := e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_roles").Scan(&totalRoles); err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
 	var totalPerms int64
-	_ = e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_permissions").Scan(&totalPerms)
+	if err := e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_permissions").Scan(&totalPerms); err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
 	var totalGroups int64
-	_ = e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_permission_groups").Scan(&totalGroups)
+	if err := e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_permission_groups").Scan(&totalGroups); err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
 
 	out.StatCards = append(out.StatCards,
 		struct {
@@ -87,7 +96,11 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*DashboardS
 		 GROUP BY r.id, r.name
 		 ORDER BY c DESC`)
 	if err == nil {
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				slog.Default().Error("dashboard rows close failed", "error", closeErr)
+			}
+		}()
 		colors := []string{"var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"}
 		colorIdx := 0
 		for rows.Next() {
@@ -117,7 +130,11 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*DashboardS
 		 GROUP BY g.id, g.name
 		 ORDER BY c DESC, g.name ASC`)
 	if err == nil {
-		defer grows.Close()
+		defer func() {
+			if closeErr := grows.Close(); closeErr != nil {
+				slog.Default().Error("dashboard grows close failed", "error", closeErr)
+			}
+		}()
 		for grows.Next() {
 			var name string
 			var c int64

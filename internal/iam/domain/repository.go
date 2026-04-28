@@ -1,3 +1,4 @@
+// Package domain contains IAM/RBAC domain types and repository interfaces.
 package domain
 
 import "context"

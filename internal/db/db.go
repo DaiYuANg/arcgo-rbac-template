@@ -1,3 +1,4 @@
+// Package db provides dbx opening helpers and dialect utilities.
 package db
 
 import (
@@ -12,10 +13,6 @@ import (
 	"github.com/arcgolabs/dbx/dialect/mysql"
 	"github.com/arcgolabs/dbx/dialect/postgres"
 	"github.com/arcgolabs/dbx/dialect/sqlite"
-
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "modernc.org/sqlite"
 )
 
 type Dialect string
@@ -55,6 +52,8 @@ func Open(ctx context.Context, cfg config.DBConfig, logger *slog.Logger) (*dbx.D
 		driver = "mysql"
 	case DialectSQLite:
 		driver = "sqlite"
+	case DialectUnknown:
+		return nil, DialectUnknown, fmt.Errorf("unsupported DB_DRIVER: %q", cfg.Driver)
 	}
 
 	var d dialect.Dialect
@@ -65,6 +64,8 @@ func Open(ctx context.Context, cfg config.DBConfig, logger *slog.Logger) (*dbx.D
 		d = mysql.New()
 	case DialectPostgres:
 		d = postgres.New()
+	case DialectUnknown:
+		return nil, DialectUnknown, fmt.Errorf("unsupported dialect: %q", dia)
 	default:
 		return nil, DialectUnknown, fmt.Errorf("unsupported dialect: %q", dia)
 	}
@@ -73,7 +74,9 @@ func Open(ctx context.Context, cfg config.DBConfig, logger *slog.Logger) (*dbx.D
 		dbx.WithDriver(driver),
 		dbx.WithDSN(cfg.DSN),
 		dbx.WithDialect(d),
-		dbx.ApplyOptions(dbx.WithLogger(logger)),
+		dbx.ApplyOptions(
+			dbx.WithLogger(logger),
+		),
 	)
 	if err != nil {
 		return nil, dia, err
@@ -82,7 +85,9 @@ func Open(ctx context.Context, cfg config.DBConfig, logger *slog.Logger) (*dbx.D
 	// Ensure the DB is reachable early (dbx.Open already validates configuration; Ping is still useful).
 	if ctx != nil {
 		if err := core.SQLDB().PingContext(ctx); err != nil {
-			_ = core.Close()
+			if closeErr := core.Close(); closeErr != nil && logger != nil {
+				logger.Error("db close failed", "error", closeErr)
+			}
 			return nil, dia, err
 		}
 	}

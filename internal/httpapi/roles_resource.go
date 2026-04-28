@@ -7,8 +7,10 @@ import (
 
 	"github.com/arcgolabs/authx"
 	"github.com/arcgolabs/dbx"
+	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/httpx"
-	"github.com/danielgtaylor/huma/v2"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
 )
 
 type RolesResource struct {
@@ -44,19 +46,24 @@ type rolesListInput struct {
 
 func (e *RolesResource) Register(registrar httpx.Registrar) {
 	g := registrar.Scope()
-	httpx.MustGroupGet(g, "", e.ListOrGetMany, func(op *huma.Operation) { op.Summary = "List / Get many" })
-	httpx.MustGroupGet(g, "/{id}", e.Get, func(op *huma.Operation) { op.Summary = "Detail" })
-	httpx.MustGroupPost(g, "", e.Create, func(op *huma.Operation) { op.Summary = "Create" })
-	httpx.MustGroupPost(g, "/bulk", e.CreateMany, func(op *huma.Operation) { op.Summary = "Create many" })
-	httpx.MustGroupPatch(g, "/{id}", e.Update, func(op *huma.Operation) { op.Summary = "Update" })
-	httpx.MustGroupPatch(g, "/bulk", e.UpdateMany, func(op *huma.Operation) { op.Summary = "Update many" })
-	httpx.MustGroupDelete(g, "/{id}", e.Delete, func(op *huma.Operation) { op.Summary = "Delete" })
-	httpx.MustGroupDelete(g, "", e.DeleteMany, func(op *huma.Operation) { op.Summary = "Delete many" })
+	httpx.MustAuto(g,
+		httpx.Auto(e.ListOrGetMany),
+		httpx.Auto(e.GetByID),
+		httpx.Auto(e.Create),
+		httpx.Auto(e.UpdateByID),
+		httpx.Auto(e.DeleteByID),
+	)
+	httpx.MustGroupPost(g, "/bulk", e.CreateMany)
+	httpx.MustGroupPatch(g, "/bulk", e.UpdateMany)
+	httpx.MustGroupDelete(g, "", e.DeleteMany)
 }
 
 func (e *RolesResource) ListOrGetMany(ctx context.Context, in *rolesListInput) (*PageResponse[RoleDTO], error) {
 	if strings.TrimSpace(in.ID) != "" {
-		items, _ := e.getMany(ctx, splitIDs(in.ID))
+		items, err := e.getMany(ctx, splitIDs(in.ID))
+		if err != nil {
+			return nil, err
+		}
 		pageSize := int64(len(items))
 		return &PageResponse[RoleDTO]{Items: items, Total: pageSize, Page: 1, PageSize: pageSize}, nil
 	}
@@ -70,51 +77,109 @@ func (e *RolesResource) List(ctx context.Context, in *rolesListInput) (*PageResp
 	if in.Page <= 0 || in.PageSize <= 0 {
 		return nil, httpx.NewError(400, "validation", fmt.Errorf("page and pageSize are required"))
 	}
-	where := " WHERE 1=1"
-	args := []any{}
+
+	type countRow struct {
+		Total int64 `dbx:"total"`
+	}
+	type roleRow struct {
+		ID          string `dbx:"id"`
+		Name        string `dbx:"name"`
+		Description string `dbx:"description"`
+		CreatedAt   int64  `dbx:"created_at"`
+	}
+
+	predicates := make([]querydsl.Predicate, 0, 3)
 	if v := strings.TrimSpace(in.NameLike); v != "" {
-		args = append(args, "%"+v+"%")
-		where += fmt.Sprintf(" AND name LIKE %s", bind(e.core, len(args)))
+		predicates = append(predicates, querydsl.Like(dbxrepo.Roles.Name, "%"+v+"%"))
 	}
 	if v := strings.TrimSpace(in.Q); v != "" {
-		args = append(args, "%"+v+"%")
-		where += fmt.Sprintf(" AND (name LIKE %s OR description LIKE %s)", bind(e.core, len(args)), bind(e.core, len(args)))
+		predicates = append(predicates, querydsl.Or(
+			querydsl.Like(dbxrepo.Roles.Name, "%"+v+"%"),
+			querydsl.Like(dbxrepo.Roles.Description, "%"+v+"%"),
+		))
 	}
-	orderSQL, err := orderBy(in.Sort, in.Order, map[string]string{
-		"id":        "id",
-		"name":      "name",
-		"createdAt": "created_at",
-	})
-	if err != nil {
-		return nil, httpx.NewError(400, "validation", err)
-	}
-	countSQL := "SELECT COUNT(1) FROM iam_roles" + where
-	var total int64
-	if err := e.core.SQLDB().QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
-		return nil, httpx.NewError(500, "unknown", err)
-	}
-	offset := (in.Page - 1) * in.PageSize
-	args2 := append([]any{}, args...)
-	args2 = append(args2, in.PageSize, offset)
-	limitBind := bind(e.core, len(args2)-1)
-	offsetBind := bind(e.core, len(args2))
-	listSQL := "SELECT id, name, description, created_at FROM iam_roles" + where + orderSQL +
-		" LIMIT " + limitBind + " OFFSET " + offsetBind
-	rows, err := e.core.SQLDB().QueryContext(ctx, listSQL, args2...)
+	where := querydsl.And(predicates...)
+
+	countQuery := querydsl.
+		Select(querydsl.CountAll().As("total")).
+		From(dbxrepo.Roles).
+		Where(where)
+	countItems, err := dbx.QueryAll(ctx, e.core, countQuery, mapper.MustStructMapper[countRow]())
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	defer rows.Close()
-	items := make([]RoleDTO, 0, in.PageSize)
-	for rows.Next() {
-		var id, name, desc string
-		var createdAt int64
-		if err := rows.Scan(&id, &name, &desc, &createdAt); err != nil {
-			return nil, httpx.NewError(500, "unknown", err)
+	total := int64(0)
+	if countItems != nil && countItems.Len() > 0 {
+		first, _ := countItems.Get(0)
+		total = first.Total
+	}
+
+	listQuery := querydsl.
+		Select(dbxrepo.Roles.ID, dbxrepo.Roles.Name, dbxrepo.Roles.Description, dbxrepo.Roles.CreatedAt).
+		From(dbxrepo.Roles).
+		Where(where).
+		PageBy(int(in.Page), int(in.PageSize))
+
+	sort := strings.TrimSpace(in.Sort)
+	order := strings.ToLower(strings.TrimSpace(in.Order))
+	if order == "" {
+		order = "asc"
+	}
+	desc := order == "desc"
+	if sort != "" {
+		var ord querydsl.Order
+		switch sort {
+		case "id":
+			if desc {
+				ord = dbxrepo.Roles.ID.Desc()
+			} else {
+				ord = dbxrepo.Roles.ID.Asc()
+			}
+		case "name":
+			if desc {
+				ord = dbxrepo.Roles.Name.Desc()
+			} else {
+				ord = dbxrepo.Roles.Name.Asc()
+			}
+		case "createdAt":
+			if desc {
+				ord = dbxrepo.Roles.CreatedAt.Desc()
+			} else {
+				ord = dbxrepo.Roles.CreatedAt.Asc()
+			}
+		default:
+			return nil, httpx.NewError(400, "validation", fmt.Errorf("invalid sort field: %s", sort))
 		}
-		gids, _ := e.listRoleGroupIDs(ctx, id)
-		items = append(items, RoleDTO{ID: id, Name: name, Description: desc, PermissionGroupIDs: gids, CreatedAt: unixMilliToRFC3339(createdAt)})
+		listQuery = listQuery.OrderBy(ord)
 	}
+
+	rows, err := dbx.QueryAll(ctx, e.core, listQuery, mapper.MustStructMapper[roleRow]())
+	if err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
+
+	items := make([]RoleDTO, 0, int(in.PageSize))
+	if rows != nil {
+		rows.Range(func(_ int, r roleRow) bool {
+			gids, gerr := e.listRoleGroupIDs(ctx, r.ID)
+			if gerr != nil {
+				err = gerr
+				return false
+			}
+			items = append(items, RoleDTO{
+				ID:                 r.ID,
+				Name:               r.Name,
+				Description:        r.Description,
+				PermissionGroupIDs: gids,
+				CreatedAt:          unixMilliToRFC3339(r.CreatedAt),
+			})
+			return true
+		})
+	}
+	if err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
+
 	return &PageResponse[RoleDTO]{Items: items, Total: total, Page: in.Page, PageSize: in.PageSize}, nil
 }
 
@@ -133,8 +198,15 @@ func (e *RolesResource) Get(ctx context.Context, in *userIDPath) (*RoleDTO, erro
 	if err := row.Scan(&id, &name, &desc, &createdAt); err != nil {
 		return nil, httpx.NewError(404, "not_found", err)
 	}
-	gids, _ := e.listRoleGroupIDs(ctx, id)
+	gids, err := e.listRoleGroupIDs(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	return &RoleDTO{ID: id, Name: name, Description: desc, PermissionGroupIDs: gids, CreatedAt: unixMilliToRFC3339(createdAt)}, nil
+}
+
+func (e *RolesResource) GetByID(ctx context.Context, in *userIDPath) (*RoleDTO, error) {
+	return e.Get(ctx, in)
 }
 
 type createRoleInput struct {
@@ -212,6 +284,10 @@ func (e *RolesResource) Update(ctx context.Context, in *updateRoleInput) (*RoleD
 	return e.Get(ctx, &userIDPath{ID: id})
 }
 
+func (e *RolesResource) UpdateByID(ctx context.Context, in *updateRoleInput) (*RoleDTO, error) {
+	return e.Update(ctx, in)
+}
+
 type updateRolesBulkInput struct {
 	ID   string  `query:"id"`
 	Body RoleDTO `json:"body"`
@@ -241,12 +317,20 @@ func (e *RolesResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, 
 	if id == "" {
 		return nil, httpx.NewError(422, "validation")
 	}
-	_, _ = e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_user_roles WHERE role_id=%s", bind(e.core, 1)), id)
-	_, _ = e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_role_permission_groups WHERE role_id=%s", bind(e.core, 1)), id)
+	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_user_roles WHERE role_id=%s", bind(e.core, 1)), id); err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
+	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_role_permission_groups WHERE role_id=%s", bind(e.core, 1)), id); err != nil {
+		return nil, httpx.NewError(500, "unknown", err)
+	}
 	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_roles WHERE id=%s", bind(e.core, 1)), id); err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
 	return &struct{}{}, nil
+}
+
+func (e *RolesResource) DeleteByID(ctx context.Context, in *userIDPath) (*struct{}, error) {
+	return e.Delete(ctx, in)
 }
 
 func (e *RolesResource) DeleteMany(ctx context.Context, in *idsQuery) (*[]RoleDTO, error) {
@@ -260,7 +344,9 @@ func (e *RolesResource) DeleteMany(ctx context.Context, in *idsQuery) (*[]RoleDT
 		if err == nil && item != nil {
 			out = append(out, *item)
 		}
-		_, _ = e.Delete(ctx, &userIDPath{ID: id})
+		if _, err := e.Delete(ctx, &userIDPath{ID: id}); err != nil {
+			return nil, err
+		}
 	}
 	return &out, nil
 }
@@ -270,16 +356,23 @@ func (e *RolesResource) listRoleGroupIDs(ctx context.Context, roleID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []string{}
 	for rows.Next() {
 		var gid string
 		if err := rows.Scan(&gid); err != nil {
+			closeRows(rows)
 			return nil, err
 		}
 		out = append(out, gid)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		closeRows(rows)
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (e *RolesResource) replaceRoleGroups(ctx context.Context, roleID string, groupIDs []string) error {

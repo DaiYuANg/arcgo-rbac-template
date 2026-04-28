@@ -243,7 +243,9 @@ func (e *AuthEndpoint) consumeOpaqueRefresh(ctx context.Context, token string) (
 	if err != nil || len(raw) == 0 {
 		return refreshSession{}, fmt.Errorf("refresh token not found")
 	}
-	_ = e.cache.Delete(ctx, key)
+	if err := e.cache.Delete(ctx, key); err != nil {
+		return refreshSession{}, err
+	}
 	var sess refreshSession
 	if err := jsonUnmarshal(raw, &sess); err != nil {
 		return refreshSession{}, err

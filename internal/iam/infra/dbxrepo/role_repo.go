@@ -34,23 +34,22 @@ func (r *RoleRepo) Ensure(ctx context.Context, roleID domain.RoleID) error {
 }
 
 func (r *RoleRepo) ListPermissions(ctx context.Context, roleID domain.RoleID) ([]domain.PermissionID, error) {
-	rows, err := r.core.SQLDB().QueryContext(ctx, `SELECT perm_id FROM iam_role_permissions WHERE role_id = ?`, string(roleID))
-	if err != nil && r.dialect == db.DialectPostgres {
-		rows, err = r.core.SQLDB().QueryContext(ctx, `SELECT perm_id FROM iam_role_permissions WHERE role_id = $1`, string(roleID))
-	}
+	items, err := queryStringColumn(
+		ctx,
+		r.core,
+		r.dialect,
+		`SELECT perm_id FROM iam_role_permissions WHERE role_id = ?`,
+		`SELECT perm_id FROM iam_role_permissions WHERE role_id = $1`,
+		string(roleID),
+	)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []domain.PermissionID
-	for rows.Next() {
-		var v string
-		if err := rows.Scan(&v); err != nil {
-			return nil, err
-		}
+	out := make([]domain.PermissionID, 0, len(items))
+	for _, v := range items {
 		out = append(out, domain.PermissionID(v))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *RoleRepo) GrantPermission(ctx context.Context, roleID domain.RoleID, permID domain.PermissionID) error {

@@ -1,8 +1,11 @@
+// Package application contains IAM/RBAC application services.
 package application
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"slices"
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 )
@@ -34,7 +37,7 @@ func (a *Authorizer) Can(ctx context.Context, userID domain.UserID, jwtRoles []s
 	// 1) direct user permissions
 	up, err := a.users.ListPermissions(ctx, userID)
 	if err != nil {
-		return Decision{Allowed: false, Reason: "user permissions lookup failed"}, err
+		return Decision{Allowed: false, Reason: "user permissions lookup failed"}, fmt.Errorf("list user permissions: %w", err)
 	}
 	if containsPerm(up, action) {
 		return Decision{Allowed: true, Reason: "user permission"}, nil
@@ -51,7 +54,7 @@ func (a *Authorizer) Can(ctx context.Context, userID domain.UserID, jwtRoles []s
 
 	sr, err := a.users.ListRoles(ctx, userID)
 	if err != nil {
-		return Decision{Allowed: false, Reason: "user roles lookup failed"}, err
+		return Decision{Allowed: false, Reason: "user roles lookup failed"}, fmt.Errorf("list user roles: %w", err)
 	}
 	roles = append(roles, sr...)
 
@@ -67,7 +70,7 @@ func (a *Authorizer) Can(ctx context.Context, userID domain.UserID, jwtRoles []s
 
 		perms, err := a.roles.ListPermissions(ctx, role)
 		if err != nil {
-			return Decision{Allowed: false, Reason: "role permissions lookup failed"}, err
+			return Decision{Allowed: false, Reason: "role permissions lookup failed"}, fmt.Errorf("list role permissions: %w", err)
 		}
 		if containsPerm(perms, action) {
 			return Decision{Allowed: true, Reason: "role permission"}, nil
@@ -78,11 +81,6 @@ func (a *Authorizer) Can(ctx context.Context, userID domain.UserID, jwtRoles []s
 }
 
 func containsPerm(xs []domain.PermissionID, want domain.PermissionID) bool {
-	for _, x := range xs {
-		if x == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, want)
 }
 

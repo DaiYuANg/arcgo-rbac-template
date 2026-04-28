@@ -1,3 +1,4 @@
+// Package migrations embeds SQL migration files used by cmd/migrate.
 package migrations
 
 import (

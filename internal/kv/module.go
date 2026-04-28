@@ -1,3 +1,4 @@
+// Package kv provides optional distributed cache/client wiring (kvx).
 package kv
 
 import (

@@ -34,23 +34,22 @@ func (r *PermissionGroupRepo) Ensure(ctx context.Context, groupID domain.Permiss
 }
 
 func (r *PermissionGroupRepo) ListPermissions(ctx context.Context, groupID domain.PermissionGroupID) ([]domain.PermissionID, error) {
-	rows, err := r.core.SQLDB().QueryContext(ctx, `SELECT perm_id FROM iam_permission_group_permissions WHERE group_id = ?`, string(groupID))
-	if err != nil && r.dialect == db.DialectPostgres {
-		rows, err = r.core.SQLDB().QueryContext(ctx, `SELECT perm_id FROM iam_permission_group_permissions WHERE group_id = $1`, string(groupID))
-	}
+	items, err := queryStringColumn(
+		ctx,
+		r.core,
+		r.dialect,
+		`SELECT perm_id FROM iam_permission_group_permissions WHERE group_id = ?`,
+		`SELECT perm_id FROM iam_permission_group_permissions WHERE group_id = $1`,
+		string(groupID),
+	)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []domain.PermissionID
-	for rows.Next() {
-		var v string
-		if err := rows.Scan(&v); err != nil {
-			return nil, err
-		}
+	out := make([]domain.PermissionID, 0, len(items))
+	for _, v := range items {
 		out = append(out, domain.PermissionID(v))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (r *PermissionGroupRepo) AddPermission(ctx context.Context, groupID domain.PermissionGroupID, permID domain.PermissionID) error {

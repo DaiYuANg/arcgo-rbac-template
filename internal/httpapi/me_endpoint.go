@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -67,7 +69,9 @@ func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*MeResponse, error) 
 	email := ""
 	if e.core != nil {
 		row := e.core.SQLDB().QueryRowContext(ctx, fmt.Sprintf("SELECT name, email FROM iam_users WHERE id=%s", bind(e.core, 1)), uid)
-		_ = row.Scan(&name, &email)
+		if err := row.Scan(&name, &email); err != nil && err != sql.ErrNoRows {
+			return nil, httpx.NewError(500, "unknown", err)
+		}
 	}
 
 	roleRefs := []RoleRef{}
@@ -75,12 +79,22 @@ func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*MeResponse, error) 
 	if e.core != nil {
 		rows, err := e.core.SQLDB().QueryContext(ctx, fmt.Sprintf("SELECT role_id FROM iam_user_roles WHERE user_id=%s", bind(e.core, 1)), uid)
 		if err == nil {
-			defer rows.Close()
 			for rows.Next() {
 				var rid string
-				if err := rows.Scan(&rid); err == nil && strings.TrimSpace(rid) != "" {
+				if err := rows.Scan(&rid); err != nil {
+					closeRows(rows)
+					return nil, httpx.NewError(500, "unknown", err)
+				}
+				if strings.TrimSpace(rid) != "" {
 					roleIDs = append(roleIDs, strings.TrimSpace(rid))
 				}
+			}
+			if err := rows.Err(); err != nil {
+				closeRows(rows)
+				return nil, httpx.NewError(500, "unknown", err)
+			}
+			if err := rows.Close(); err != nil {
+				return nil, httpx.NewError(500, "unknown", err)
 			}
 		}
 	}
@@ -97,7 +111,9 @@ func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*MeResponse, error) 
 			}
 			row := e.core.SQLDB().QueryRowContext(ctx, fmt.Sprintf("SELECT name FROM iam_roles WHERE id=%s", bind(e.core, 1)), rid)
 			rname := rid
-			_ = row.Scan(&rname)
+			if err := row.Scan(&rname); err != nil && err != sql.ErrNoRows {
+				return nil, httpx.NewError(500, "unknown", err)
+			}
 			roleRefs = append(roleRefs, RoleRef{ID: rid, Name: rname})
 		}
 	} else {
@@ -144,11 +160,21 @@ func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*MeResponse, error) 
 			var gids []string
 			for grows.Next() {
 				var gid string
-				if err := grows.Scan(&gid); err == nil && strings.TrimSpace(gid) != "" {
+				if err := grows.Scan(&gid); err != nil {
+					closeRows(grows)
+					return nil, httpx.NewError(500, "unknown", err)
+				}
+				if strings.TrimSpace(gid) != "" {
 					gids = append(gids, strings.TrimSpace(gid))
 				}
 			}
-			_ = grows.Close()
+			if err := grows.Err(); err != nil {
+				closeRows(grows)
+				return nil, httpx.NewError(500, "unknown", err)
+			}
+			if err := grows.Close(); err != nil {
+				return nil, httpx.NewError(500, "unknown", err)
+			}
 			for _, gid := range gids {
 				// group -> perm ids
 				prows, err := e.core.SQLDB().QueryContext(ctx, fmt.Sprintf("SELECT perm_id FROM iam_permission_group_permissions WHERE group_id=%s", bind(e.core, 1)), gid)
@@ -158,11 +184,21 @@ func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*MeResponse, error) 
 				var pids []string
 				for prows.Next() {
 					var pid string
-					if err := prows.Scan(&pid); err == nil && strings.TrimSpace(pid) != "" {
+					if err := prows.Scan(&pid); err != nil {
+						closeRows(prows)
+						return nil, httpx.NewError(500, "unknown", err)
+					}
+					if strings.TrimSpace(pid) != "" {
 						pids = append(pids, strings.TrimSpace(pid))
 					}
 				}
-				_ = prows.Close()
+				if err := prows.Err(); err != nil {
+					closeRows(prows)
+					return nil, httpx.NewError(500, "unknown", err)
+				}
+				if err := prows.Close(); err != nil {
+					return nil, httpx.NewError(500, "unknown", err)
+				}
 				for _, pid := range pids {
 					row := e.core.SQLDB().QueryRowContext(ctx, fmt.Sprintf("SELECT code FROM iam_permissions WHERE id=%s", bind(e.core, 1)), pid)
 					var code string
@@ -193,7 +229,9 @@ func (e *MeEndpoint) Get(ctx context.Context, _ *struct{}) (*MeResponse, error) 
 				ttl = 30 * time.Second
 			}
 			key := strings.TrimSpace(e.cachePrefix) + "me:" + uid
-			_ = e.cache.Set(ctx, key, bytes, ttl)
+			if err := e.cache.Set(ctx, key, bytes, ttl); err != nil {
+				slog.Default().Error("me cache set failed", "error", err)
+			}
 		}
 	}
 	return resp, nil

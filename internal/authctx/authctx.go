@@ -1,3 +1,4 @@
+// Package authctx provides a small, centralized way to access authx principal data from context.
 package authctx
 
 import (

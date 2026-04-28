@@ -1,9 +1,6 @@
 package authn
 
 import (
-	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
-	"github.com/arcgolabs/authx"
-	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dix"
 )
 
@@ -11,9 +8,7 @@ import (
 func Module() dix.Module {
 	return dix.NewModule("authn",
 		dix.Providers(
-			dix.Provider2(func(cfg config.Config, core *dbx.DB) authx.AuthenticationProvider {
-				return NewPasswordProvider(cfg, core)
-			}),
+			dix.Provider2(NewPasswordProvider),
 		),
 	)
 }

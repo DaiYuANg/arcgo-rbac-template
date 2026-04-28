@@ -1,3 +1,4 @@
+// Package logger wires a slog logger via logx.
 package logger
 
 import (

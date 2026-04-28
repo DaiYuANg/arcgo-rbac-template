@@ -11,6 +11,10 @@ import (
 	"github.com/arcgolabs/arcgo-rbac-template/internal/migrations"
 	dbxmigrate "github.com/arcgolabs/dbx/migrate"
 	"github.com/arcgolabs/dix"
+
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "modernc.org/sqlite"
 )
 
 func main() {
@@ -34,7 +38,11 @@ func main() {
 							logger.Error("db open failed", "error", err)
 							return err
 						}
-						defer func() { _ = core.Close() }()
+						defer func() {
+							if closeErr := core.Close(); closeErr != nil {
+								logger.Error("db close failed", "error", closeErr)
+							}
+						}()
 
 						_ = dialect
 						runner := dbxmigrate.NewRunner(core.SQLDB(), core.Dialect(), dbxmigrate.RunnerOptions{
