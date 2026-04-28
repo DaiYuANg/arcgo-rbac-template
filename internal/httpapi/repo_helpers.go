@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/arcgolabs/authx"
 	"github.com/arcgolabs/dbx"
@@ -21,6 +22,9 @@ func nowAndEnforce(ctx context.Context, core *dbx.DB, engine *authx.Engine, acti
 
 func repoCreate[E any, S repository.EntitySchema[E]](ctx context.Context, core *dbx.DB, schema S, entity *E) error {
 	r := repository.New[E](core, schema)
-	return r.Create(ctx, entity)
+	if err := r.Create(ctx, entity); err != nil {
+		return fmt.Errorf("repo create: %w", err)
+	}
+	return nil
 }
 

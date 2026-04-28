@@ -3,8 +3,12 @@ module github.com/arcgolabs/arcgo-rbac-template
 go 1.26.2
 
 require (
+	github.com/DaiYuANg/arcgo/kvx v0.2.5
+	github.com/DaiYuANg/arcgo/kvx/adapter/redis v0.2.5
+	github.com/DaiYuANg/arcgo/kvx/adapter/valkey v0.2.5
 	github.com/arcgolabs/authx v0.1.0
 	github.com/arcgolabs/authx/jwt v0.1.0
+	github.com/arcgolabs/collectionx v0.2.0
 	github.com/arcgolabs/configx v0.3.0
 	github.com/arcgolabs/dbx v0.1.1
 	github.com/arcgolabs/dbx/migrate v0.1.0
@@ -17,6 +21,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.12
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.8.0
+	golang.org/x/crypto v0.50.0
 	modernc.org/sqlite v1.48.1
 )
 
@@ -24,15 +29,11 @@ require (
 	ariga.io/atlas v1.2.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/DaiYuANg/arcgo/collectionx v0.1.6 // indirect
-	github.com/DaiYuANg/arcgo/kvx v0.2.5 // indirect
-	github.com/DaiYuANg/arcgo/kvx/adapter/redis v0.2.5 // indirect
-	github.com/DaiYuANg/arcgo/kvx/adapter/valkey v0.2.5 // indirect
 	github.com/DmitriyVTitov/size v1.5.0 // indirect
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
-	github.com/arcgolabs/collectionx v0.2.0 // indirect
 	github.com/arcgolabs/collectionx/internal v0.2.0 // indirect
 	github.com/arcgolabs/collectionx/interval v0.2.0 // indirect
 	github.com/arcgolabs/collectionx/list v0.2.0 // indirect
@@ -122,7 +123,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect

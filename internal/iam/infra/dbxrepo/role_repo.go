@@ -3,45 +3,34 @@ package dbxrepo
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 	"github.com/arcgolabs/dbx"
-	"github.com/arcgolabs/dbx/repository"
+	"github.com/arcgolabs/dbx/querydsl"
 )
 
 type RoleRepo struct {
-	core    *dbx.DB
-	dialect db.Dialect
-	repo    *repository.Base[Role, RoleSchema]
+	baseRepo[Role, RoleSchema]
 }
 
 func NewRoleRepo(core *dbx.DB, dialect db.Dialect) *RoleRepo {
 	return &RoleRepo{
-		core:    core,
-		dialect: dialect,
-		repo:    repository.New[Role](core, Roles),
+		baseRepo: newBaseRepo[Role](core, dialect, Roles),
 	}
 }
 
 func (r *RoleRepo) Ensure(ctx context.Context, roleID domain.RoleID) error {
-	id := strings.TrimSpace(string(roleID))
-	if id == "" {
-		return fmt.Errorf("role id is empty")
-	}
-	return r.repo.Upsert(ctx, &Role{ID: id}, "id")
+	return ensureStringID(ctx, r.repo, string(roleID), "role", func(id string) *Role {
+		return &Role{ID: id}
+	})
 }
 
 func (r *RoleRepo) ListPermissions(ctx context.Context, roleID domain.RoleID) ([]domain.PermissionID, error) {
-	items, err := queryStringColumn(
-		ctx,
-		r.core,
-		r.dialect,
-		`SELECT perm_id FROM iam_role_permissions WHERE role_id = ?`,
-		`SELECT perm_id FROM iam_role_permissions WHERE role_id = $1`,
-		string(roleID),
-	)
+	q := querydsl.Select(RolePermissions.PermID.As("value")).
+		From(RolePermissions).
+		Where(RolePermissions.RoleID.Eq(string(roleID)))
+	items, err := queryStringColumn(ctx, r.core, q)
 	if err != nil {
 		return nil, err
 	}
@@ -56,19 +45,16 @@ func (r *RoleRepo) GrantPermission(ctx context.Context, roleID domain.RoleID, pe
 	if err := r.Ensure(ctx, roleID); err != nil {
 		return err
 	}
-	switch r.dialect {
-	case db.DialectMySQL:
-		_, err := r.core.SQLDB().ExecContext(ctx, `INSERT IGNORE INTO iam_role_permissions (role_id, perm_id) VALUES (?, ?)`, string(roleID), string(permID))
-		return err
-	case db.DialectSQLite:
-		_, err := r.core.SQLDB().ExecContext(ctx, `INSERT OR IGNORE INTO iam_role_permissions (role_id, perm_id) VALUES (?, ?)`, string(roleID), string(permID))
-		return err
-	case db.DialectPostgres:
-		_, err := r.core.SQLDB().ExecContext(ctx, `INSERT INTO iam_role_permissions (role_id, perm_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, string(roleID), string(permID))
-		return err
-	default:
-		return fmt.Errorf("unsupported dialect: %s", r.dialect)
+	ins := querydsl.
+		InsertInto(RolePermissions).
+		Values(RolePermissions.RoleID.Set(string(roleID)), RolePermissions.PermID.Set(string(permID))).
+		OnConflict(RolePermissions.RoleID, RolePermissions.PermID).
+		DoNothing()
+	_, err := dbx.Exec(ctx, r.core, ins)
+	if err != nil {
+		return fmt.Errorf("grant permission: %w", err)
 	}
+	return nil
 }
 
 var _ domain.RoleRepository = (*RoleRepo)(nil)

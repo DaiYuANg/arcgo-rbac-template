@@ -1,10 +1,9 @@
+// Package httpapi implements HTTP endpoints using httpx (Fiber adapter).
 package httpapi
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
-	"encoding/base64"
 	"strings"
 	"time"
 
@@ -85,7 +84,7 @@ func (e *AuthEndpoint) Login(ctx context.Context, in *loginInput) (*tokenWithCoo
 		return nil, httpx.NewError(500, "token_sign_failed", err)
 	}
 
-	refresh := ""
+	var refresh string
 	if e.cache != nil {
 		opaque, serr := e.issueOpaqueRefresh(ctx, p.ID, roles)
 		if serr != nil {
@@ -179,7 +178,11 @@ func (e *AuthEndpoint) signAccessToken(subject string, roles []string) (string, 
 		},
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return tok.SignedString([]byte(e.cfg.Auth.JWTSecret))
+	raw, err := tok.SignedString([]byte(e.cfg.Auth.JWTSecret))
+	if err != nil {
+		return "", fmt.Errorf("sign access token: %w", err)
+	}
+	return raw, nil
 }
 
 func (e *AuthEndpoint) signRefreshToken(subject string, roles []string) (string, error) {
@@ -200,114 +203,10 @@ func (e *AuthEndpoint) signRefreshToken(subject string, roles []string) (string,
 		},
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return tok.SignedString([]byte(e.cfg.Auth.JWTSecret))
-}
-
-type refreshSession struct {
-	Subject string   `json:"sub"`
-	Roles   []string `json:"roles"`
-}
-
-func (e *AuthEndpoint) refreshKey(token string) string {
-	prefix := strings.TrimSpace(e.cachePrefix)
-	if prefix == "" {
-		prefix = "arcgo:"
-	}
-	return prefix + "rt:" + token
-}
-
-func (e *AuthEndpoint) issueOpaqueRefresh(ctx context.Context, subject string, roles []string) (string, error) {
-	token, err := randomToken(32)
+	raw, err := tok.SignedString([]byte(e.cfg.Auth.JWTSecret))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("sign refresh token: %w", err)
 	}
-	sess := refreshSession{Subject: subject, Roles: roles}
-	raw, err := jsonMarshal(sess)
-	if err != nil {
-		return "", err
-	}
-	ttl := e.cfg.Auth.RefreshTokenTTL
-	if ttl <= 0 {
-		ttl = 7 * 24 * time.Hour
-	}
-	if err := e.cache.Set(ctx, e.refreshKey(token), raw, ttl); err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
-// consumeOpaqueRefresh loads and invalidates the refresh token (rotation).
-func (e *AuthEndpoint) consumeOpaqueRefresh(ctx context.Context, token string) (refreshSession, error) {
-	key := e.refreshKey(token)
-	raw, err := e.cache.Get(ctx, key)
-	if err != nil || len(raw) == 0 {
-		return refreshSession{}, fmt.Errorf("refresh token not found")
-	}
-	if err := e.cache.Delete(ctx, key); err != nil {
-		return refreshSession{}, err
-	}
-	var sess refreshSession
-	if err := jsonUnmarshal(raw, &sess); err != nil {
-		return refreshSession{}, err
-	}
-	if strings.TrimSpace(sess.Subject) == "" {
-		return refreshSession{}, fmt.Errorf("invalid refresh session")
-	}
-	if sess.Roles == nil {
-		sess.Roles = []string{}
-	}
-	return sess, nil
-}
-
-func randomToken(n int) (string, error) {
-	if n <= 0 {
-		n = 32
-	}
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-func buildRefreshCookie(token string, secure bool, maxAgeSeconds int) string {
-	if maxAgeSeconds <= 0 {
-		maxAgeSeconds = int((7 * 24 * time.Hour).Seconds())
-	}
-	parts := []string{
-		fmt.Sprintf("refreshToken=%s", token),
-		"Path=/",
-		"HttpOnly",
-		"SameSite=Lax",
-		fmt.Sprintf("Max-Age=%d", maxAgeSeconds),
-	}
-	if secure {
-		parts = append(parts, "Secure")
-	}
-	return strings.Join(parts, "; ")
-}
-
-func cookieValue(rawCookie string, key string) string {
-	rawCookie = strings.TrimSpace(rawCookie)
-	if rawCookie == "" || strings.TrimSpace(key) == "" {
-		return ""
-	}
-	parts := strings.Split(rawCookie, ";")
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		k := strings.TrimSpace(kv[0])
-		v := strings.TrimSpace(kv[1])
-		if k == key {
-			return v
-		}
-	}
-	return ""
+	return raw, nil
 }
 

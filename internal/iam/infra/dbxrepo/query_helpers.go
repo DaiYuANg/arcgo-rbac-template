@@ -2,39 +2,31 @@ package dbxrepo
 
 import (
 	"context"
-	"database/sql"
-	"errors"
+	"fmt"
 
-	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
 	"github.com/arcgolabs/dbx"
+	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/querydsl"
 )
 
-func queryStringColumn(ctx context.Context, core *dbx.DB, dialect db.Dialect, sqlDefault, sqlPostgres, arg string) ([]string, error) {
-	q := sqlDefault
-	if dialect == db.DialectPostgres {
-		q = sqlPostgres
+type oneStringRow struct {
+	Value string `dbx:"value"`
+}
+
+func queryStringColumn(ctx context.Context, core *dbx.DB, query querydsl.Builder) ([]string, error) {
+	if core == nil {
+		return nil, dbx.ErrNilDB
 	}
-	rows, err := core.SQLDB().QueryContext(ctx, q, arg)
+	items, err := dbx.QueryAll(ctx, core, query, mapper.MustStructMapper[oneStringRow]())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("db query all: %w", err)
 	}
-	out := []string{}
-	for rows.Next() {
-		var v sql.NullString
-		if err := rows.Scan(&v); err != nil {
-			closeErr := rows.Close()
-			return nil, errors.Join(err, closeErr)
-		}
-		if v.Valid {
-			out = append(out, v.String)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		closeErr := rows.Close()
-		return nil, errors.Join(err, closeErr)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
+	out := make([]string, 0, items.Len())
+	if items != nil {
+		items.Range(func(_ int, r oneStringRow) bool {
+			out = append(out, r.Value)
+			return true
+		})
 	}
 	return out, nil
 }

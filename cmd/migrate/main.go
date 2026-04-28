@@ -1,7 +1,9 @@
+// Command migrate applies embedded SQL migrations to the configured database.
 package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -36,7 +38,7 @@ func main() {
 						core, dialect, err := db.Open(ctx, cfg.DB, logger)
 						if err != nil {
 							logger.Error("db open failed", "error", err)
-							return err
+							return fmt.Errorf("db open: %w", err)
 						}
 						defer func() {
 							if closeErr := core.Close(); closeErr != nil {
@@ -58,7 +60,7 @@ func main() {
 						report, err := runner.UpSQL(ctx, source)
 						if err != nil {
 							logger.Error("migration failed", "error", err)
-							return err
+							return fmt.Errorf("migration up: %w", err)
 						}
 
 						logger.Info("migration completed", "applied", report.Applied.Len())

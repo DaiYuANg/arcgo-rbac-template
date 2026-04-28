@@ -2,24 +2,19 @@ package httpapi
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/arcgolabs/authx"
-	"github.com/DaiYuANg/arcgo/kvx"
-	"github.com/arcgolabs/dbx"
-	"github.com/arcgolabs/dbx/mapper"
-	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/httpx"
-	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
+	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 )
 
 type UsersResource struct {
 	engine *authx.Engine
-	core   *dbx.DB
-	cache  kvx.KV
-	cachePrefix string
+	svc    iamservice.UsersService
 	cacheTTL    time.Duration
 }
 
@@ -40,8 +35,8 @@ func (e *UsersResource) EndpointSpec() httpx.EndpointSpec {
 }
 
 type usersListInput struct {
-	Page     int64  `query:"page" minimum:"1"`
-	PageSize int64  `query:"pageSize" minimum:"1"`
+	Page     int64  `minimum:"1"        query:"page"`
+	PageSize int64  `minimum:"1"        query:"pageSize"`
 	Q        string `query:"q"`
 	Sort     string `query:"sort"`
 	Order    string `query:"order"`
@@ -64,120 +59,30 @@ func (e *UsersResource) Register(registrar httpx.Registrar) {
 }
 
 func (e *UsersResource) List(ctx context.Context, in *usersListInput) (*PageResponse[UserDTO], error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
 	if in.Page <= 0 || in.PageSize <= 0 {
-		return nil, httpx.NewError(400, "validation", fmt.Errorf("page and pageSize are required"))
+		return nil, httpx.NewError(400, "validation", errors.New("page and pageSize are required"))
 	}
-
-	type countRow struct {
-		Total int64 `dbx:"total"`
-	}
-	type userRow struct {
-		ID        string `dbx:"id"`
-		Email     string `dbx:"email"`
-		Name      string `dbx:"name"`
-		CreatedAt int64  `dbx:"created_at"`
-	}
-
-	predicates := make([]querydsl.Predicate, 0, 4)
-	if v := strings.TrimSpace(in.NameLike); v != "" {
-		predicates = append(predicates, querydsl.Like(dbxrepo.Users.Name, "%"+v+"%"))
-	}
-	if v := strings.TrimSpace(in.EmailLike); v != "" {
-		predicates = append(predicates, querydsl.Like(dbxrepo.Users.Email, "%"+v+"%"))
-	}
-	if v := strings.TrimSpace(in.Q); v != "" {
-		predicates = append(predicates, querydsl.Or(
-			querydsl.Like(dbxrepo.Users.Name, "%"+v+"%"),
-			querydsl.Like(dbxrepo.Users.Email, "%"+v+"%"),
-		))
-	}
-	where := querydsl.And(predicates...)
-
-	countQuery := querydsl.
-		Select(querydsl.CountAll().As("total")).
-		From(dbxrepo.Users).
-		Where(where)
-	countItems, err := dbx.QueryAll(ctx, e.core, countQuery, mapper.MustStructMapper[countRow]())
+	page, err := e.svc.List(ctx, domain.UsersListQuery{
+		PageParams: domain.PageParams{Page: in.Page, PageSize: in.PageSize},
+		Q:         strings.TrimSpace(in.Q),
+		Sort:      strings.TrimSpace(in.Sort),
+		Order:     domain.NormalizeOrder(in.Order),
+		NameLike:  strings.TrimSpace(in.NameLike),
+		EmailLike: strings.TrimSpace(in.EmailLike),
+	})
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	total := int64(0)
-	if countItems != nil && countItems.Len() > 0 {
-		first, _ := countItems.Get(0)
-		total = first.Total
-	}
-
-	listQuery := querydsl.
-		Select(dbxrepo.Users.ID, dbxrepo.Users.Email, dbxrepo.Users.Name, dbxrepo.Users.CreatedAt).
-		From(dbxrepo.Users).
-		Where(where).
-		PageBy(int(in.Page), int(in.PageSize))
-
-	sort := strings.TrimSpace(in.Sort)
-	order := strings.ToLower(strings.TrimSpace(in.Order))
-	if order == "" {
-		order = "asc"
-	}
-	desc := order == "desc"
-	if sort != "" {
-		var ord querydsl.Order
-		switch sort {
-		case "id":
-			if desc {
-				ord = dbxrepo.Users.ID.Desc()
-			} else {
-				ord = dbxrepo.Users.ID.Asc()
-			}
-		case "email":
-			if desc {
-				ord = dbxrepo.Users.Email.Desc()
-			} else {
-				ord = dbxrepo.Users.Email.Asc()
-			}
-		case "name":
-			if desc {
-				ord = dbxrepo.Users.Name.Desc()
-			} else {
-				ord = dbxrepo.Users.Name.Asc()
-			}
-		case "createdAt":
-			if desc {
-				ord = dbxrepo.Users.CreatedAt.Desc()
-			} else {
-				ord = dbxrepo.Users.CreatedAt.Asc()
-			}
-		default:
-			return nil, httpx.NewError(400, "validation", fmt.Errorf("invalid sort field: %s", sort))
-		}
-		listQuery = listQuery.OrderBy(ord)
-	}
-
-	rows, err := dbx.QueryAll(ctx, e.core, listQuery, mapper.MustStructMapper[userRow]())
-	if err != nil {
-		return nil, httpx.NewError(500, "unknown", err)
-	}
-
-	items := make([]UserDTO, 0, int(in.PageSize))
-	if rows != nil {
-		rows.Range(func(_ int, r userRow) bool {
-			items = append(items, UserDTO{
-				ID:        r.ID,
-				Email:     r.Email,
-				Name:      r.Name,
-				CreatedAt: unixMilliToRFC3339(r.CreatedAt),
-			})
-			return true
+	items := make([]UserDTO, 0, len(page.Items))
+	for _, u := range page.Items {
+		items = append(items, UserDTO{
+			ID:        string(u.ID),
+			Email:     u.Email,
+			Name:      u.Name,
+			CreatedAt: unixMilliToRFC3339(u.CreatedAt),
 		})
 	}
-	return &PageResponse[UserDTO]{
-		Items:    items,
-		Total:    total,
-		Page:     in.Page,
-		PageSize: in.PageSize,
-	}, nil
+	return &PageResponse[UserDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, nil
 }
 
 type userIDPath struct {
@@ -185,25 +90,28 @@ type userIDPath struct {
 }
 
 func (e *UsersResource) Get(ctx context.Context, in *userIDPath) (*UserDTO, error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
 	id := strings.TrimSpace(in.ID)
 	if id == "" {
 		return nil, httpx.NewError(400, "validation")
 	}
-	b1 := bind(e.core, 1)
-	row := e.core.SQLDB().QueryRowContext(ctx, fmt.Sprintf("SELECT id, email, name, created_at FROM iam_users WHERE id = %s", b1), id)
-	var email, name string
-	var createdAt int64
-	if err := row.Scan(&id, &email, &name, &createdAt); err != nil {
-		return nil, httpx.NewError(404, "not_found", err)
-	}
-	roleIDs, err := e.listUserRoleIDs(ctx, id)
+	u, roleIDs, err := e.svc.Get(ctx, domain.UserID(id))
 	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, httpx.NewError(404, "not_found", err)
+		}
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	return &UserDTO{ID: id, Email: email, Name: name, RoleIDs: roleIDs, CreatedAt: unixMilliToRFC3339(createdAt)}, nil
+	outRoles := make([]string, 0, len(roleIDs))
+	for _, rid := range roleIDs {
+		outRoles = append(outRoles, string(rid))
+	}
+	return &UserDTO{
+		ID:        string(u.ID),
+		Email:     u.Email,
+		Name:      u.Name,
+		RoleIDs:   outRoles,
+		CreatedAt: unixMilliToRFC3339(u.CreatedAt),
+	}, nil
 }
 
 func (e *UsersResource) GetByID(ctx context.Context, in *userIDPath) (*UserDTO, error) {
@@ -236,25 +144,32 @@ func normalizeUserCreate(u *UserDTO) error {
 }
 
 func (e *UsersResource) createUser(ctx context.Context, u UserDTO) (*UserDTO, error) {
-	now, err := nowAndEnforce(ctx, e.core, e.engine, "users:write", "/users")
-	if err != nil {
+	if err := enforce(ctx, e.engine, "users:write", "/users"); err != nil {
 		return nil, err
 	}
-
-	ent := dbxrepo.User{
-		ID:        u.ID,
+	now := time.Now().UnixMilli()
+	roleIDs := make([]domain.RoleID, 0, len(u.RoleIDs))
+	for _, rid := range u.RoleIDs {
+		rid = strings.TrimSpace(rid)
+		if rid != "" {
+			roleIDs = append(roleIDs, domain.RoleID(rid))
+		}
+	}
+	created, outRoles, err := e.svc.Create(ctx, domain.User{
+		ID:        domain.UserID(u.ID),
 		Email:     u.Email,
 		Name:      u.Name,
 		CreatedAt: now,
-	}
-	if err := repoCreate(ctx, e.core, dbxrepo.Users, &ent); err != nil {
+	}, roleIDs)
+	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	u.ID = ent.ID
-	if err := e.replaceUserRoles(ctx, u.ID, u.RoleIDs); err != nil {
-		return nil, err
+	u.ID = string(created.ID)
+	u.CreatedAt = unixMilliToRFC3339(created.CreatedAt)
+	u.RoleIDs = make([]string, 0, len(outRoles))
+	for _, rid := range outRoles {
+		u.RoleIDs = append(u.RoleIDs, string(rid))
 	}
-	u.CreatedAt = unixMilliToRFC3339(now)
 	return &u, nil
 }
 
@@ -282,9 +197,6 @@ type updateUserInput struct {
 }
 
 func (e *UsersResource) Update(ctx context.Context, in *updateUserInput) (*UserDTO, error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
 	if err := enforce(ctx, e.engine, "users:write", "/users"); err != nil {
 		return nil, err
 	}
@@ -297,18 +209,31 @@ func (e *UsersResource) Update(ctx context.Context, in *updateUserInput) (*UserD
 	if email == "" || name == "" {
 		return nil, httpx.NewError(422, "validation")
 	}
-	q := fmt.Sprintf("UPDATE iam_users SET email=%s, name=%s WHERE id=%s", bind(e.core, 1), bind(e.core, 2), bind(e.core, 3))
-	if _, err := e.core.SQLDB().ExecContext(ctx, q, email, name, id); err != nil {
+	roleIDs := make([]domain.RoleID, 0, len(in.Body.RoleIDs))
+	for _, rid := range in.Body.RoleIDs {
+		rid = strings.TrimSpace(rid)
+		if rid != "" {
+			roleIDs = append(roleIDs, domain.RoleID(rid))
+		}
+	}
+	updated, outRoles, err := e.svc.Update(ctx, domain.User{ID: domain.UserID(id), Email: email, Name: name}, roleIDs)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, httpx.NewError(404, "not_found", err)
+		}
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	if err := e.replaceUserRoles(ctx, id, in.Body.RoleIDs); err != nil {
-		return nil, err
+	dtoRoles := make([]string, 0, len(outRoles))
+	for _, rid := range outRoles {
+		dtoRoles = append(dtoRoles, string(rid))
 	}
-	dto, err := e.Get(ctx, &userIDPath{ID: id})
-	if err != nil {
-		return nil, err
-	}
-	return dto, nil
+	return &UserDTO{
+		ID:        string(updated.ID),
+		Email:     updated.Email,
+		Name:      updated.Name,
+		RoleIDs:   dtoRoles,
+		CreatedAt: unixMilliToRFC3339(updated.CreatedAt),
+	}, nil
 }
 
 func (e *UsersResource) UpdateByID(ctx context.Context, in *updateUserInput) (*UserDTO, error) {
@@ -334,9 +259,6 @@ func (e *UsersResource) UpdateMany(ctx context.Context, in *updateUsersBulkInput
 }
 
 func (e *UsersResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
 	if err := enforce(ctx, e.engine, "users:write", "/users"); err != nil {
 		return nil, err
 	}
@@ -344,10 +266,7 @@ func (e *UsersResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, 
 	if id == "" {
 		return nil, httpx.NewError(422, "validation")
 	}
-	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_user_roles WHERE user_id=%s", bind(e.core, 1)), id); err != nil {
-		return nil, httpx.NewError(500, "unknown", err)
-	}
-	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_users WHERE id=%s", bind(e.core, 1)), id); err != nil {
+	if err := e.svc.Delete(ctx, domain.UserID(id)); err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
 	return &struct{}{}, nil
@@ -442,47 +361,5 @@ func splitIDs(raw string) []string {
 	return out
 }
 
-func (e *UsersResource) listUserRoleIDs(ctx context.Context, userID string) ([]string, error) {
-	rows, err := e.core.SQLDB().QueryContext(ctx, fmt.Sprintf("SELECT role_id FROM iam_user_roles WHERE user_id=%s", bind(e.core, 1)), userID)
-	if err != nil {
-		return nil, err
-	}
-	out := []string{}
-	for rows.Next() {
-		var rid string
-		if err := rows.Scan(&rid); err != nil {
-			closeRows(rows)
-			return nil, err
-		}
-		out = append(out, rid)
-	}
-	if err := rows.Err(); err != nil {
-		closeRows(rows)
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (e *UsersResource) replaceUserRoles(ctx context.Context, userID string, roleIDs []string) error {
-	if roleIDs == nil {
-		return nil
-	}
-	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_user_roles WHERE user_id=%s", bind(e.core, 1)), userID); err != nil {
-		return httpx.NewError(500, "unknown", err)
-	}
-	for _, rid := range roleIDs {
-		rid = strings.TrimSpace(rid)
-		if rid == "" {
-			continue
-		}
-		q := fmt.Sprintf("INSERT INTO iam_user_roles (user_id, role_id) VALUES (%s,%s)", bind(e.core, 1), bind(e.core, 2))
-		if _, err := e.core.SQLDB().ExecContext(ctx, q, userID, rid); err != nil {
-			return httpx.NewError(500, "unknown", err)
-		}
-	}
-	return nil
-}
+// NOTE: role link operations moved into domain repository/service layer.
 

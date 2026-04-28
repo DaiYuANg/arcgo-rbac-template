@@ -79,7 +79,7 @@ func Open(ctx context.Context, cfg config.DBConfig, logger *slog.Logger) (*dbx.D
 		),
 	)
 	if err != nil {
-		return nil, dia, err
+		return nil, dia, fmt.Errorf("dbx open: %w", err)
 	}
 
 	// Ensure the DB is reachable early (dbx.Open already validates configuration; Ping is still useful).
@@ -88,7 +88,7 @@ func Open(ctx context.Context, cfg config.DBConfig, logger *slog.Logger) (*dbx.D
 			if closeErr := core.Close(); closeErr != nil && logger != nil {
 				logger.Error("db close failed", "error", closeErr)
 			}
-			return nil, dia, err
+			return nil, dia, fmt.Errorf("db ping: %w", err)
 		}
 	}
 	return core, dia, nil

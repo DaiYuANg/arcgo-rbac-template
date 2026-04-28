@@ -1,7 +1,9 @@
+// Command server starts the HTTP API server.
 package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -43,13 +45,14 @@ func main() {
 			config.Module(),
 			authn.Module(),
 			kv.Module(),
+			application.Module(),
 			httpapi.Module(),
 			dix.NewModule("rbac-template",
 				dix.Providers(
 					dix.ProviderErr2(func(cfg config.Config, logger *slog.Logger) (*DBHandle, error) {
 						core, dialect, err := db.Open(rootCtx, cfg.DB, logger)
 						if err != nil {
-							return nil, err
+							return nil, fmt.Errorf("db open: %w", err)
 						}
 						return &DBHandle{Core: core, Dialect: dialect}, nil
 					}),
@@ -94,11 +97,11 @@ func main() {
 								authjwt.WithHMACSecret([]byte(cfg.Auth.JWTSecret)),
 							),
 						); err != nil {
-							return nil, err
+							return nil, fmt.Errorf("register jwt provider: %w", err)
 						}
 						if passwordProvider != nil {
 							if err := engine.RegisterProvider(passwordProvider); err != nil {
-								return nil, err
+								return nil, fmt.Errorf("register password provider: %w", err)
 							}
 						}
 						engine.SetAuthorizer(authz.NewIAMAuthorizer(iamAuthz))

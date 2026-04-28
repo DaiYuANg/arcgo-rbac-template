@@ -34,16 +34,38 @@ func (a *Authorizer) Can(ctx context.Context, userID domain.UserID, jwtRoles []s
 		return Decision{Allowed: false, Reason: "missing action"}, nil
 	}
 
-	// 1) direct user permissions
-	up, err := a.users.ListPermissions(ctx, userID)
+	ok, err := a.hasDirectUserPermission(ctx, userID, action)
 	if err != nil {
-		return Decision{Allowed: false, Reason: "user permissions lookup failed"}, fmt.Errorf("list user permissions: %w", err)
+		return Decision{Allowed: false, Reason: "user permissions lookup failed"}, err
 	}
-	if containsPerm(up, action) {
+	if ok {
 		return Decision{Allowed: true, Reason: "user permission"}, nil
 	}
 
-	// 2) roles: JWT roles + stored roles
+	roleIDs, err := a.collectRoleIDs(ctx, userID, jwtRoles)
+	if err != nil {
+		return Decision{Allowed: false, Reason: "user roles lookup failed"}, err
+	}
+
+	ok, err = a.hasRolePermission(ctx, roleIDs, action)
+	if err != nil {
+		return Decision{Allowed: false, Reason: "role permissions lookup failed"}, err
+	}
+	if ok {
+		return Decision{Allowed: true, Reason: "role permission"}, nil
+	}
+	return Decision{Allowed: false, Reason: "denied"}, nil
+}
+
+func (a *Authorizer) hasDirectUserPermission(ctx context.Context, userID domain.UserID, action domain.PermissionID) (bool, error) {
+	up, err := a.users.ListPermissions(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("list user permissions: %w", err)
+	}
+	return containsPerm(up, action), nil
+}
+
+func (a *Authorizer) collectRoleIDs(ctx context.Context, userID domain.UserID, jwtRoles []string) ([]domain.RoleID, error) {
 	roles := make([]domain.RoleID, 0, len(jwtRoles)+4)
 	for _, r := range jwtRoles {
 		r = strings.TrimSpace(r)
@@ -51,16 +73,18 @@ func (a *Authorizer) Can(ctx context.Context, userID domain.UserID, jwtRoles []s
 			roles = append(roles, domain.RoleID(r))
 		}
 	}
-
 	sr, err := a.users.ListRoles(ctx, userID)
 	if err != nil {
-		return Decision{Allowed: false, Reason: "user roles lookup failed"}, fmt.Errorf("list user roles: %w", err)
+		return nil, fmt.Errorf("list user roles: %w", err)
 	}
-	roles = append(roles, sr...)
+	return append(roles, sr...), nil
+}
 
+func (a *Authorizer) hasRolePermission(ctx context.Context, roles []domain.RoleID, action domain.PermissionID) (bool, error) {
 	seen := map[domain.RoleID]struct{}{}
 	for _, role := range roles {
-		if strings.TrimSpace(string(role)) == "" {
+		role = domain.RoleID(strings.TrimSpace(string(role)))
+		if role == "" {
 			continue
 		}
 		if _, ok := seen[role]; ok {
@@ -70,14 +94,13 @@ func (a *Authorizer) Can(ctx context.Context, userID domain.UserID, jwtRoles []s
 
 		perms, err := a.roles.ListPermissions(ctx, role)
 		if err != nil {
-			return Decision{Allowed: false, Reason: "role permissions lookup failed"}, fmt.Errorf("list role permissions: %w", err)
+			return false, fmt.Errorf("list role permissions: %w", err)
 		}
 		if containsPerm(perms, action) {
-			return Decision{Allowed: true, Reason: "role permission"}, nil
+			return true, nil
 		}
 	}
-
-	return Decision{Allowed: false, Reason: "denied"}, nil
+	return false, nil
 }
 
 func containsPerm(xs []domain.PermissionID, want domain.PermissionID) bool {

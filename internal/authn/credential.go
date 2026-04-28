@@ -1,3 +1,4 @@
+// Package authn provides authentication providers for authx.
 package authn
 
 // PasswordCredential is a username+password credential used for interactive login.

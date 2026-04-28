@@ -2,6 +2,7 @@ package dbxrepo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,11 +12,13 @@ import (
 )
 
 type PermissionRepo struct {
+	core *dbx.DB
 	repo *repository.Base[Permission, PermissionSchema]
 }
 
 func NewPermissionRepo(core *dbx.DB) *PermissionRepo {
 	return &PermissionRepo{
+		core: core,
 		repo: repository.New[Permission](core, Permissions),
 	}
 }
@@ -23,9 +26,12 @@ func NewPermissionRepo(core *dbx.DB) *PermissionRepo {
 func (r *PermissionRepo) Ensure(ctx context.Context, permID domain.PermissionID) error {
 	id := strings.TrimSpace(string(permID))
 	if id == "" {
-		return fmt.Errorf("permission id is empty")
+		return errors.New("permission id is empty")
 	}
-	return r.repo.Upsert(ctx, &Permission{ID: id}, "id")
+	if err := r.repo.Upsert(ctx, &Permission{ID: id}, "id"); err != nil {
+		return fmt.Errorf("permission upsert: %w", err)
+	}
+	return nil
 }
 
 var _ domain.PermissionRepository = (*PermissionRepo)(nil)

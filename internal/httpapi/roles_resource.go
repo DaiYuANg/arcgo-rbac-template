@@ -2,20 +2,18 @@ package httpapi
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/arcgolabs/authx"
-	"github.com/arcgolabs/dbx"
-	"github.com/arcgolabs/dbx/mapper"
-	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/httpx"
-	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
+	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 )
 
 type RolesResource struct {
 	engine *authx.Engine
-	core   *dbx.DB
+	svc    iamservice.RolesService
 }
 
 func (e *RolesResource) FiberBinding() FiberBinding {
@@ -60,10 +58,7 @@ func (e *RolesResource) Register(registrar httpx.Registrar) {
 
 func (e *RolesResource) ListOrGetMany(ctx context.Context, in *rolesListInput) (*PageResponse[RoleDTO], error) {
 	if strings.TrimSpace(in.ID) != "" {
-		items, err := e.getMany(ctx, splitIDs(in.ID))
-		if err != nil {
-			return nil, err
-		}
+		items := e.getMany(ctx, splitIDs(in.ID))
 		pageSize := int64(len(items))
 		return &PageResponse[RoleDTO]{Items: items, Total: pageSize, Page: 1, PageSize: pageSize}, nil
 	}
@@ -71,138 +66,65 @@ func (e *RolesResource) ListOrGetMany(ctx context.Context, in *rolesListInput) (
 }
 
 func (e *RolesResource) List(ctx context.Context, in *rolesListInput) (*PageResponse[RoleDTO], error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
 	if in.Page <= 0 || in.PageSize <= 0 {
-		return nil, httpx.NewError(400, "validation", fmt.Errorf("page and pageSize are required"))
+		return nil, httpx.NewError(400, "validation", errors.New("page and pageSize are required"))
 	}
-
-	type countRow struct {
-		Total int64 `dbx:"total"`
-	}
-	type roleRow struct {
-		ID          string `dbx:"id"`
-		Name        string `dbx:"name"`
-		Description string `dbx:"description"`
-		CreatedAt   int64  `dbx:"created_at"`
-	}
-
-	predicates := make([]querydsl.Predicate, 0, 3)
-	if v := strings.TrimSpace(in.NameLike); v != "" {
-		predicates = append(predicates, querydsl.Like(dbxrepo.Roles.Name, "%"+v+"%"))
-	}
-	if v := strings.TrimSpace(in.Q); v != "" {
-		predicates = append(predicates, querydsl.Or(
-			querydsl.Like(dbxrepo.Roles.Name, "%"+v+"%"),
-			querydsl.Like(dbxrepo.Roles.Description, "%"+v+"%"),
-		))
-	}
-	where := querydsl.And(predicates...)
-
-	countQuery := querydsl.
-		Select(querydsl.CountAll().As("total")).
-		From(dbxrepo.Roles).
-		Where(where)
-	countItems, err := dbx.QueryAll(ctx, e.core, countQuery, mapper.MustStructMapper[countRow]())
+	page, err := e.svc.List(ctx, domain.RolesListQuery{
+		PageParams: domain.PageParams{Page: in.Page, PageSize: in.PageSize},
+		Q:         strings.TrimSpace(in.Q),
+		Sort:      strings.TrimSpace(in.Sort),
+		Order:     domain.NormalizeOrder(in.Order),
+		NameLike:  strings.TrimSpace(in.NameLike),
+	})
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	total := int64(0)
-	if countItems != nil && countItems.Len() > 0 {
-		first, _ := countItems.Get(0)
-		total = first.Total
-	}
 
-	listQuery := querydsl.
-		Select(dbxrepo.Roles.ID, dbxrepo.Roles.Name, dbxrepo.Roles.Description, dbxrepo.Roles.CreatedAt).
-		From(dbxrepo.Roles).
-		Where(where).
-		PageBy(int(in.Page), int(in.PageSize))
-
-	sort := strings.TrimSpace(in.Sort)
-	order := strings.ToLower(strings.TrimSpace(in.Order))
-	if order == "" {
-		order = "asc"
-	}
-	desc := order == "desc"
-	if sort != "" {
-		var ord querydsl.Order
-		switch sort {
-		case "id":
-			if desc {
-				ord = dbxrepo.Roles.ID.Desc()
-			} else {
-				ord = dbxrepo.Roles.ID.Asc()
-			}
-		case "name":
-			if desc {
-				ord = dbxrepo.Roles.Name.Desc()
-			} else {
-				ord = dbxrepo.Roles.Name.Asc()
-			}
-		case "createdAt":
-			if desc {
-				ord = dbxrepo.Roles.CreatedAt.Desc()
-			} else {
-				ord = dbxrepo.Roles.CreatedAt.Asc()
-			}
-		default:
-			return nil, httpx.NewError(400, "validation", fmt.Errorf("invalid sort field: %s", sort))
+	items := make([]RoleDTO, 0, len(page.Items))
+	for _, r := range page.Items {
+		_, gids, gerr := e.svc.Get(ctx, r.ID)
+		if gerr != nil && !errors.Is(gerr, domain.ErrNotFound) {
+			return nil, httpx.NewError(500, "unknown", gerr)
 		}
-		listQuery = listQuery.OrderBy(ord)
-	}
-
-	rows, err := dbx.QueryAll(ctx, e.core, listQuery, mapper.MustStructMapper[roleRow]())
-	if err != nil {
-		return nil, httpx.NewError(500, "unknown", err)
-	}
-
-	items := make([]RoleDTO, 0, int(in.PageSize))
-	if rows != nil {
-		rows.Range(func(_ int, r roleRow) bool {
-			gids, gerr := e.listRoleGroupIDs(ctx, r.ID)
-			if gerr != nil {
-				err = gerr
-				return false
-			}
-			items = append(items, RoleDTO{
-				ID:                 r.ID,
-				Name:               r.Name,
-				Description:        r.Description,
-				PermissionGroupIDs: gids,
-				CreatedAt:          unixMilliToRFC3339(r.CreatedAt),
-			})
-			return true
+		outGids := make([]string, 0, len(gids))
+		for _, gid := range gids {
+			outGids = append(outGids, string(gid))
+		}
+		items = append(items, RoleDTO{
+			ID:                 string(r.ID),
+			Name:               r.Name,
+			Description:        r.Description,
+			PermissionGroupIDs: outGids,
+			CreatedAt:          unixMilliToRFC3339(r.CreatedAt),
 		})
 	}
-	if err != nil {
-		return nil, httpx.NewError(500, "unknown", err)
-	}
 
-	return &PageResponse[RoleDTO]{Items: items, Total: total, Page: in.Page, PageSize: in.PageSize}, nil
+	return &PageResponse[RoleDTO]{Items: items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, nil
 }
 
 func (e *RolesResource) Get(ctx context.Context, in *userIDPath) (*RoleDTO, error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
 	id := strings.TrimSpace(in.ID)
 	if id == "" {
 		return nil, httpx.NewError(422, "validation")
 	}
-	q := fmt.Sprintf("SELECT id, name, description, created_at FROM iam_roles WHERE id=%s", bind(e.core, 1))
-	row := e.core.SQLDB().QueryRowContext(ctx, q, id)
-	var name, desc string
-	var createdAt int64
-	if err := row.Scan(&id, &name, &desc, &createdAt); err != nil {
-		return nil, httpx.NewError(404, "not_found", err)
-	}
-	gids, err := e.listRoleGroupIDs(ctx, id)
+	r, gids, err := e.svc.Get(ctx, domain.RoleID(id))
 	if err != nil {
-		return nil, err
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, httpx.NewError(404, "not_found", err)
+		}
+		return nil, httpx.NewError(500, "unknown", err)
 	}
-	return &RoleDTO{ID: id, Name: name, Description: desc, PermissionGroupIDs: gids, CreatedAt: unixMilliToRFC3339(createdAt)}, nil
+	outGids := make([]string, 0, len(gids))
+	for _, gid := range gids {
+		outGids = append(outGids, string(gid))
+	}
+	return &RoleDTO{
+		ID:                 string(r.ID),
+		Name:               r.Name,
+		Description:        r.Description,
+		PermissionGroupIDs: outGids,
+		CreatedAt:          unixMilliToRFC3339(r.CreatedAt),
+	}, nil
 }
 
 func (e *RolesResource) GetByID(ctx context.Context, in *userIDPath) (*RoleDTO, error) {
@@ -214,9 +136,6 @@ type createRoleInput struct {
 }
 
 func (e *RolesResource) Create(ctx context.Context, in *createRoleInput) (*RoleDTO, error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
 	if err := enforce(ctx, e.engine, "roles:write", "/roles"); err != nil {
 		return nil, err
 	}
@@ -228,15 +147,30 @@ func (e *RolesResource) Create(ctx context.Context, in *createRoleInput) (*RoleD
 	}
 	desc := strings.TrimSpace(r.Description)
 	now := nowUnixMilli()
-	q := fmt.Sprintf("INSERT INTO iam_roles (id, name, description, created_at) VALUES (%s,%s,%s,%s)", bind(e.core, 1), bind(e.core, 2), bind(e.core, 3), bind(e.core, 4))
-	if _, err := e.core.SQLDB().ExecContext(ctx, q, r.ID, r.Name, desc, now); err != nil {
+	groupIDs := make([]domain.PermissionGroupID, 0, len(r.PermissionGroupIDs))
+	for _, gid := range r.PermissionGroupIDs {
+		gid = strings.TrimSpace(gid)
+		if gid != "" {
+			groupIDs = append(groupIDs, domain.PermissionGroupID(gid))
+		}
+	}
+	created, outGroups, err := e.svc.Create(ctx, domain.Role{
+		ID:          domain.RoleID(r.ID),
+		Name:        r.Name,
+		Description: desc,
+		CreatedAt:   now,
+	}, groupIDs)
+	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	if err := e.replaceRoleGroups(ctx, r.ID, r.PermissionGroupIDs); err != nil {
-		return nil, err
+	r.ID = string(created.ID)
+	r.Name = created.Name
+	r.Description = created.Description
+	r.CreatedAt = unixMilliToRFC3339(created.CreatedAt)
+	r.PermissionGroupIDs = make([]string, 0, len(outGroups))
+	for _, gid := range outGroups {
+		r.PermissionGroupIDs = append(r.PermissionGroupIDs, string(gid))
 	}
-	r.CreatedAt = unixMilliToRFC3339(now)
-	r.Description = desc
 	return &r, nil
 }
 
@@ -262,9 +196,6 @@ type updateRoleInput struct {
 }
 
 func (e *RolesResource) Update(ctx context.Context, in *updateRoleInput) (*RoleDTO, error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
 	if err := enforce(ctx, e.engine, "roles:write", "/roles"); err != nil {
 		return nil, err
 	}
@@ -274,14 +205,31 @@ func (e *RolesResource) Update(ctx context.Context, in *updateRoleInput) (*RoleD
 	if id == "" || name == "" {
 		return nil, httpx.NewError(422, "validation")
 	}
-	q := fmt.Sprintf("UPDATE iam_roles SET name=%s, description=%s WHERE id=%s", bind(e.core, 1), bind(e.core, 2), bind(e.core, 3))
-	if _, err := e.core.SQLDB().ExecContext(ctx, q, name, desc, id); err != nil {
+	groupIDs := make([]domain.PermissionGroupID, 0, len(in.Body.PermissionGroupIDs))
+	for _, gid := range in.Body.PermissionGroupIDs {
+		gid = strings.TrimSpace(gid)
+		if gid != "" {
+			groupIDs = append(groupIDs, domain.PermissionGroupID(gid))
+		}
+	}
+	updated, outGroups, err := e.svc.Update(ctx, domain.Role{ID: domain.RoleID(id), Name: name, Description: desc}, groupIDs)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, httpx.NewError(404, "not_found", err)
+		}
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	if err := e.replaceRoleGroups(ctx, id, in.Body.PermissionGroupIDs); err != nil {
-		return nil, err
+	dtoGroups := make([]string, 0, len(outGroups))
+	for _, gid := range outGroups {
+		dtoGroups = append(dtoGroups, string(gid))
 	}
-	return e.Get(ctx, &userIDPath{ID: id})
+	return &RoleDTO{
+		ID:                 string(updated.ID),
+		Name:               updated.Name,
+		Description:        updated.Description,
+		PermissionGroupIDs: dtoGroups,
+		CreatedAt:          unixMilliToRFC3339(updated.CreatedAt),
+	}, nil
 }
 
 func (e *RolesResource) UpdateByID(ctx context.Context, in *updateRoleInput) (*RoleDTO, error) {
@@ -307,9 +255,6 @@ func (e *RolesResource) UpdateMany(ctx context.Context, in *updateRolesBulkInput
 }
 
 func (e *RolesResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, error) {
-	if e.core == nil {
-		return nil, httpx.NewError(500, "db_missing")
-	}
 	if err := enforce(ctx, e.engine, "roles:write", "/roles"); err != nil {
 		return nil, err
 	}
@@ -317,13 +262,7 @@ func (e *RolesResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, 
 	if id == "" {
 		return nil, httpx.NewError(422, "validation")
 	}
-	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_user_roles WHERE role_id=%s", bind(e.core, 1)), id); err != nil {
-		return nil, httpx.NewError(500, "unknown", err)
-	}
-	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_role_permission_groups WHERE role_id=%s", bind(e.core, 1)), id); err != nil {
-		return nil, httpx.NewError(500, "unknown", err)
-	}
-	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_roles WHERE id=%s", bind(e.core, 1)), id); err != nil {
+	if err := e.svc.Delete(ctx, domain.RoleID(id)); err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
 	return &struct{}{}, nil
@@ -351,51 +290,9 @@ func (e *RolesResource) DeleteMany(ctx context.Context, in *idsQuery) (*[]RoleDT
 	return &out, nil
 }
 
-func (e *RolesResource) listRoleGroupIDs(ctx context.Context, roleID string) ([]string, error) {
-	rows, err := e.core.SQLDB().QueryContext(ctx, fmt.Sprintf("SELECT group_id FROM iam_role_permission_groups WHERE role_id=%s", bind(e.core, 1)), roleID)
-	if err != nil {
-		return nil, err
-	}
-	out := []string{}
-	for rows.Next() {
-		var gid string
-		if err := rows.Scan(&gid); err != nil {
-			closeRows(rows)
-			return nil, err
-		}
-		out = append(out, gid)
-	}
-	if err := rows.Err(); err != nil {
-		closeRows(rows)
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
+// NOTE: group link operations moved into domain repository/service layer.
 
-func (e *RolesResource) replaceRoleGroups(ctx context.Context, roleID string, groupIDs []string) error {
-	if groupIDs == nil {
-		return nil
-	}
-	if _, err := e.core.SQLDB().ExecContext(ctx, fmt.Sprintf("DELETE FROM iam_role_permission_groups WHERE role_id=%s", bind(e.core, 1)), roleID); err != nil {
-		return httpx.NewError(500, "unknown", err)
-	}
-	for _, gid := range groupIDs {
-		gid = strings.TrimSpace(gid)
-		if gid == "" {
-			continue
-		}
-		q := fmt.Sprintf("INSERT INTO iam_role_permission_groups (role_id, group_id) VALUES (%s,%s)", bind(e.core, 1), bind(e.core, 2))
-		if _, err := e.core.SQLDB().ExecContext(ctx, q, roleID, gid); err != nil {
-			return httpx.NewError(500, "unknown", err)
-		}
-	}
-	return nil
-}
-
-func (e *RolesResource) getMany(ctx context.Context, ids []string) ([]RoleDTO, error) {
+func (e *RolesResource) getMany(ctx context.Context, ids []string) []RoleDTO {
 	out := []RoleDTO{}
 	for _, id := range ids {
 		item, err := e.Get(ctx, &userIDPath{ID: id})
@@ -403,6 +300,6 @@ func (e *RolesResource) getMany(ctx context.Context, ids []string) ([]RoleDTO, e
 			out = append(out, *item)
 		}
 	}
-	return out, nil
+	return out
 }
 

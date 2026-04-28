@@ -3,45 +3,34 @@ package dbxrepo
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 	"github.com/arcgolabs/dbx"
-	"github.com/arcgolabs/dbx/repository"
+	"github.com/arcgolabs/dbx/querydsl"
 )
 
 type PermissionGroupRepo struct {
-	core    *dbx.DB
-	dialect db.Dialect
-	repo    *repository.Base[PermissionGroup, PermissionGroupSchema]
+	baseRepo[PermissionGroup, PermissionGroupSchema]
 }
 
 func NewPermissionGroupRepo(core *dbx.DB, dialect db.Dialect) *PermissionGroupRepo {
 	return &PermissionGroupRepo{
-		core:    core,
-		dialect: dialect,
-		repo:    repository.New[PermissionGroup](core, PermissionGroups),
+		baseRepo: newBaseRepo[PermissionGroup](core, dialect, PermissionGroups),
 	}
 }
 
 func (r *PermissionGroupRepo) Ensure(ctx context.Context, groupID domain.PermissionGroupID) error {
-	id := strings.TrimSpace(string(groupID))
-	if id == "" {
-		return fmt.Errorf("permission group id is empty")
-	}
-	return r.repo.Upsert(ctx, &PermissionGroup{ID: id}, "id")
+	return ensureStringID(ctx, r.repo, string(groupID), "permission group", func(id string) *PermissionGroup {
+		return &PermissionGroup{ID: id}
+	})
 }
 
-func (r *PermissionGroupRepo) ListPermissions(ctx context.Context, groupID domain.PermissionGroupID) ([]domain.PermissionID, error) {
-	items, err := queryStringColumn(
-		ctx,
-		r.core,
-		r.dialect,
-		`SELECT perm_id FROM iam_permission_group_permissions WHERE group_id = ?`,
-		`SELECT perm_id FROM iam_permission_group_permissions WHERE group_id = $1`,
-		string(groupID),
-	)
+func (r *PermissionGroupRepo) listPermissionIDs(ctx context.Context, groupID string) ([]domain.PermissionID, error) {
+	q := querydsl.Select(PermissionGroupPermissions.PermID.As("value")).
+		From(PermissionGroupPermissions).
+		Where(PermissionGroupPermissions.GroupID.Eq(groupID))
+	items, err := queryStringColumn(ctx, r.core, q)
 	if err != nil {
 		return nil, err
 	}
@@ -52,23 +41,28 @@ func (r *PermissionGroupRepo) ListPermissions(ctx context.Context, groupID domai
 	return out, nil
 }
 
+func (r *PermissionGroupRepo) ListPermissions(ctx context.Context, groupID domain.PermissionGroupID) ([]domain.PermissionID, error) {
+	return r.listPermissionIDs(ctx, string(groupID))
+}
+
 func (r *PermissionGroupRepo) AddPermission(ctx context.Context, groupID domain.PermissionGroupID, permID domain.PermissionID) error {
 	if err := r.Ensure(ctx, groupID); err != nil {
 		return err
 	}
-	switch r.dialect {
-	case db.DialectMySQL:
-		_, err := r.core.SQLDB().ExecContext(ctx, `INSERT IGNORE INTO iam_permission_group_permissions (group_id, perm_id) VALUES (?, ?)`, string(groupID), string(permID))
-		return err
-	case db.DialectSQLite:
-		_, err := r.core.SQLDB().ExecContext(ctx, `INSERT OR IGNORE INTO iam_permission_group_permissions (group_id, perm_id) VALUES (?, ?)`, string(groupID), string(permID))
-		return err
-	case db.DialectPostgres:
-		_, err := r.core.SQLDB().ExecContext(ctx, `INSERT INTO iam_permission_group_permissions (group_id, perm_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, string(groupID), string(permID))
-		return err
-	default:
-		return fmt.Errorf("unsupported dialect: %s", r.dialect)
+	ins := r.insertPermission(string(groupID), string(permID))
+	_, err := dbx.Exec(ctx, r.core, ins)
+	if err != nil {
+		return fmt.Errorf("add permission: %w", err)
 	}
+	return nil
+}
+
+func (r *PermissionGroupRepo) insertPermission(groupID, permID string) querydsl.Builder {
+	return querydsl.
+		InsertInto(PermissionGroupPermissions).
+		Values(PermissionGroupPermissions.GroupID.Set(groupID), PermissionGroupPermissions.PermID.Set(permID)).
+		OnConflict(PermissionGroupPermissions.GroupID, PermissionGroupPermissions.PermID).
+		DoNothing()
 }
 
 var _ domain.PermissionGroupRepository = (*PermissionGroupRepo)(nil)

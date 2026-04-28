@@ -40,6 +40,9 @@ func NewPasswordProvider(cfg config.Config, core *dbx.DB) authx.AuthenticationPr
 			}
 			p, ok, err := checkDBUser(ctx, core, username, password)
 			if err != nil {
+				if errors.Is(err, authx.ErrUnauthenticated) {
+					return authx.AuthenticationResult{}, authx.ErrUnauthenticated
+				}
 				return authx.AuthenticationResult{}, err
 			}
 			if ok {
@@ -53,7 +56,7 @@ func NewPasswordProvider(cfg config.Config, core *dbx.DB) authx.AuthenticationPr
 
 func normalizeSources(s string) map[string]bool {
 	set := map[string]bool{}
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		key := strings.ToLower(strings.TrimSpace(part))
 		if key != "" {
 			set[key] = true
@@ -77,7 +80,7 @@ func checkDBUser(ctx context.Context, core *dbx.DB, username, password string) (
 		return authx.Principal{}, false, errors.New("db core not ready")
 	}
 	bind := core.Dialect().BindVar(1)
-	q := fmt.Sprintf(`SELECT password_hash, roles FROM auth_users WHERE username = %s`, bind)
+	q := `SELECT password_hash, roles FROM auth_users WHERE username = ` + bind
 	row := core.SQLDB().QueryRowContext(ctx, q, username)
 	var hash string
 	var roles string
@@ -85,15 +88,15 @@ func checkDBUser(ctx context.Context, core *dbx.DB, username, password string) (
 		if errors.Is(err, sql.ErrNoRows) {
 			return authx.Principal{}, false, nil
 		}
-		return authx.Principal{}, false, err
+		return authx.Principal{}, false, fmt.Errorf("scan auth_users: %w", err)
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
-		return authx.Principal{}, false, nil
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+		return authx.Principal{}, false, authx.ErrUnauthenticated
 	}
 
 	roleList := collectionx.NewList[string]()
-	for _, part := range strings.Split(roles, ",") {
+	for part := range strings.SplitSeq(roles, ",") {
 		r := strings.TrimSpace(part)
 		if r != "" {
 			roleList.Add(r)
