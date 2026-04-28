@@ -36,14 +36,10 @@ func (r *PermissionRepo) Get(ctx context.Context, permID domain.PermissionID) (d
 		LeftJoin(joinTable).On(joinPermID.EqColumn(Permissions.ID)).
 		Where(Permissions.ID.Eq(id)).
 		Limit(1)
-	items, err := dbx.QueryAll(ctx, r.core, q, mapper.MustStructMapper[row]())
+	first, err := queryOne[row](ctx, r.core, q, "permission get")
 	if err != nil {
-		return domain.Permission{}, fmt.Errorf("permission get: %w", err)
+		return domain.Permission{}, err
 	}
-	if items == nil || items.Len() == 0 {
-		return domain.Permission{}, domain.ErrNotFound
-	}
-	first, _ := items.Get(0)
 	return domain.Permission{
 		ID:        domain.PermissionID(first.ID),
 		Name:      first.Name,
@@ -52,7 +48,34 @@ func (r *PermissionRepo) Get(ctx context.Context, permID domain.PermissionID) (d
 	}, nil
 }
 
-func (r *PermissionRepo) List(ctx context.Context, q domain.PermissionsListQuery) (domain.Page[domain.Permission], error) {
+var permissionListOrders = map[string]func(bool) querydsl.Order{
+	"id": func(d bool) querydsl.Order {
+		if d {
+			return Permissions.ID.Desc()
+		}
+		return Permissions.ID.Asc()
+	},
+	"name": func(d bool) querydsl.Order {
+		if d {
+			return Permissions.Name.Desc()
+		}
+		return Permissions.Name.Asc()
+	},
+	"code": func(d bool) querydsl.Order {
+		if d {
+			return Permissions.Code.Desc()
+		}
+		return Permissions.Code.Asc()
+	},
+	"createdAt": func(d bool) querydsl.Order {
+		if d {
+			return Permissions.CreatedAt.Desc()
+		}
+		return Permissions.CreatedAt.Asc()
+	},
+}
+
+func permissionListPredicates(q domain.PermissionsListQuery) []querydsl.Predicate {
 	preds := make([]querydsl.Predicate, 0, 4)
 	if v := strings.TrimSpace(q.NameLike); v != "" {
 		preds = append(preds, querydsl.Like(Permissions.Name, "%"+v+"%"))
@@ -66,23 +89,25 @@ func (r *PermissionRepo) List(ctx context.Context, q domain.PermissionsListQuery
 			querydsl.Like(Permissions.Code, "%"+v+"%"),
 		))
 	}
-	where := querydsl.And(preds...)
+	return preds
+}
 
-	type countRow struct {
-		Total int64 `dbx:"total"`
-	}
+func (r *PermissionRepo) List(ctx context.Context, q domain.PermissionsListQuery) (domain.Page[domain.Permission], error) {
+	where := querydsl.And(permissionListPredicates(q)...)
+
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
 		From(Permissions).
 		Where(where)
-	countItems, err := dbx.QueryAll(ctx, r.core, countQuery, mapper.MustStructMapper[countRow]())
+	total, err := countTotal(ctx, r.core, countQuery)
 	if err != nil {
 		return domain.Page[domain.Permission]{}, fmt.Errorf("permission list count: %w", err)
 	}
-	total := int64(0)
-	if countItems != nil && countItems.Len() > 0 {
-		first, _ := countItems.Get(0)
-		total = first.Total
+
+	desc := q.Order == domain.SortDesc
+	ord, oerr := listOrderBy(q.Sort, desc, permissionListOrders)
+	if oerr != nil {
+		return domain.Page[domain.Permission]{}, fmt.Errorf("permission list: %w", oerr)
 	}
 
 	type row struct {
@@ -95,44 +120,8 @@ func (r *PermissionRepo) List(ctx context.Context, q domain.PermissionsListQuery
 		Select(Permissions.ID, Permissions.Name, Permissions.Code, Permissions.CreatedAt).
 		From(Permissions).
 		Where(where).
-		PageBy(int(q.Page), int(q.PageSize))
-
-	desc := q.Order == domain.SortDesc
-	sortKey := strings.TrimSpace(q.Sort)
-	if sortKey == "" {
-		sortKey = "id"
-	}
-	orders := map[string]func(bool) querydsl.Order{
-		"id": func(d bool) querydsl.Order {
-			if d {
-				return Permissions.ID.Desc()
-			}
-			return Permissions.ID.Asc()
-		},
-		"name": func(d bool) querydsl.Order {
-			if d {
-				return Permissions.Name.Desc()
-			}
-			return Permissions.Name.Asc()
-		},
-		"code": func(d bool) querydsl.Order {
-			if d {
-				return Permissions.Code.Desc()
-			}
-			return Permissions.Code.Asc()
-		},
-		"createdAt": func(d bool) querydsl.Order {
-			if d {
-				return Permissions.CreatedAt.Desc()
-			}
-			return Permissions.CreatedAt.Asc()
-		},
-	}
-	orderFn, ok := orders[sortKey]
-	if !ok {
-		return domain.Page[domain.Permission]{}, fmt.Errorf("permission list: invalid sort field: %s", q.Sort)
-	}
-	listQuery = listQuery.OrderBy(orderFn(desc))
+		PageBy(int(q.Page), int(q.PageSize)).
+		OrderBy(ord)
 
 	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
 	if err != nil {

@@ -173,24 +173,6 @@ func (e *UsersResource) createUser(ctx context.Context, u UserDTO) (*UserDTO, er
 	return &u, nil
 }
 
-
-
-type createUsersBulkInput struct {
-	Body BulkItems[UserDTO] `json:"body"`
-}
-
-func (e *UsersResource) CreateMany(ctx context.Context, in *createUsersBulkInput) (*[]UserDTO, error) {
-	out := make([]UserDTO, 0, len(in.Body.Items))
-	for _, item := range in.Body.Items {
-		created, err := e.Create(ctx, &createUserInput{Body: item})
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *created)
-	}
-	return &out, nil
-}
-
 type updateUserInput struct {
 	ID   string  `path:"id"`
 	Body UserDTO `json:"body"`
@@ -240,24 +222,6 @@ func (e *UsersResource) UpdateByID(ctx context.Context, in *updateUserInput) (*U
 	return e.Update(ctx, in)
 }
 
-type updateUsersBulkInput struct {
-	ID   string  `query:"id"`
-	Body UserDTO `json:"body"`
-}
-
-func (e *UsersResource) UpdateMany(ctx context.Context, in *updateUsersBulkInput) (*[]UserDTO, error) {
-	ids := splitIDs(in.ID)
-	out := make([]UserDTO, 0, len(ids))
-	for _, id := range ids {
-		dto, err := e.Update(ctx, &updateUserInput{ID: id, Body: in.Body})
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *dto)
-	}
-	return &out, nil
-}
-
 func (e *UsersResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, error) {
 	if err := enforce(ctx, e.engine, "users:write", "/users"); err != nil {
 		return nil, err
@@ -274,91 +238,6 @@ func (e *UsersResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, 
 
 func (e *UsersResource) DeleteByID(ctx context.Context, in *userIDPath) (*struct{}, error) {
 	return e.Delete(ctx, in)
-}
-
-type idsQuery struct {
-	ID string `query:"id"`
-}
-
-type usersListOrManyInput struct {
-	idsQuery
-	usersListInput
-}
-
-func (e *UsersResource) ListOrGetMany(ctx context.Context, in *usersListOrManyInput) (*PageResponse[UserDTO], error) {
-	if strings.TrimSpace(in.ID) != "" {
-		items, err := e.GetMany(ctx, &idsQuery{ID: in.ID})
-		if err != nil {
-			return nil, err
-		}
-		pageSize := int64(0)
-		if items != nil {
-			pageSize = int64(len(*items))
-		}
-		return &PageResponse[UserDTO]{
-			Items:    loOrEmpty(items),
-			Total:    pageSize,
-			Page:     1,
-			PageSize: pageSize,
-		}, nil
-	}
-	return e.List(ctx, &in.usersListInput)
-}
-
-func loOrEmpty(items *[]UserDTO) []UserDTO {
-	if items == nil {
-		return []UserDTO{}
-	}
-	return *items
-}
-
-func (e *UsersResource) DeleteManyOrGetMany(ctx context.Context, in *idsQuery) (*[]UserDTO, error) {
-	if err := enforce(ctx, e.engine, "users:write", "/users"); err != nil {
-		return nil, err
-	}
-	// This handler is only used for DELETE many (method-bound), but httpx's typed inputs are shared.
-	// We still keep it returning []UserDTO to match contract when needed.
-	ids := splitIDs(in.ID)
-	out := make([]UserDTO, 0, len(ids))
-	for _, id := range ids {
-		item, err := e.Get(ctx, &userIDPath{ID: id})
-		if err == nil && item != nil {
-			out = append(out, *item)
-		}
-		if _, err := e.Delete(ctx, &userIDPath{ID: id}); err != nil {
-			return nil, err
-		}
-	}
-	return &out, nil
-}
-
-func (e *UsersResource) GetMany(ctx context.Context, in *idsQuery) (*[]UserDTO, error) {
-	ids := splitIDs(in.ID)
-	out := make([]UserDTO, 0, len(ids))
-	for _, id := range ids {
-		item, err := e.Get(ctx, &userIDPath{ID: id})
-		if err != nil {
-			continue
-		}
-		out = append(out, *item)
-	}
-	return &out, nil
-}
-
-func splitIDs(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		v := strings.TrimSpace(p)
-		if v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
 }
 
 // NOTE: role link operations moved into domain repository/service layer.

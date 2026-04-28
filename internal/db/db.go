@@ -18,10 +18,10 @@ import (
 type Dialect string
 
 const (
-	DialectSQLite    Dialect = "sqlite"
-	DialectMySQL     Dialect = "mysql"
-	DialectPostgres  Dialect = "postgres"
-	DialectUnknown   Dialect = "unknown"
+	DialectSQLite   Dialect = "sqlite"
+	DialectMySQL    Dialect = "mysql"
+	DialectPostgres Dialect = "postgres"
+	DialectUnknown  Dialect = "unknown"
 )
 
 func DialectFromDriver(driver string) Dialect {
@@ -37,41 +37,33 @@ func DialectFromDriver(driver string) Dialect {
 	}
 }
 
+func sqlDriverAndDialect(dia Dialect) (driver string, d dialect.Dialect, err error) {
+	switch dia {
+	case DialectPostgres:
+		return "pgx", postgres.New(), nil
+	case DialectMySQL:
+		return "mysql", mysql.New(), nil
+	case DialectSQLite:
+		return "sqlite", sqlite.New(), nil
+	case DialectUnknown:
+		return "", nil, fmt.Errorf("unsupported dialect: %q", dia)
+	default:
+		return "", nil, fmt.Errorf("unsupported dialect: %q", dia)
+	}
+}
+
 func Open(ctx context.Context, cfg config.DBConfig, logger *slog.Logger) (*dbx.DB, Dialect, error) {
 	dia := DialectFromDriver(cfg.Driver)
 	if dia == DialectUnknown {
 		return nil, DialectUnknown, fmt.Errorf("unsupported DB_DRIVER: %q", cfg.Driver)
 	}
-
-	driver := strings.ToLower(strings.TrimSpace(cfg.Driver))
-	switch dia {
-	case DialectPostgres:
-		// dbx uses database/sql driver name.
-		driver = "pgx"
-	case DialectMySQL:
-		driver = "mysql"
-	case DialectSQLite:
-		driver = "sqlite"
-	case DialectUnknown:
-		return nil, DialectUnknown, fmt.Errorf("unsupported DB_DRIVER: %q", cfg.Driver)
-	}
-
-	var d dialect.Dialect
-	switch dia {
-	case DialectSQLite:
-		d = sqlite.New()
-	case DialectMySQL:
-		d = mysql.New()
-	case DialectPostgres:
-		d = postgres.New()
-	case DialectUnknown:
-		return nil, DialectUnknown, fmt.Errorf("unsupported dialect: %q", dia)
-	default:
-		return nil, DialectUnknown, fmt.Errorf("unsupported dialect: %q", dia)
+	driverName, d, err := sqlDriverAndDialect(dia)
+	if err != nil {
+		return nil, dia, err
 	}
 
 	core, err := dbx.Open(
-		dbx.WithDriver(driver),
+		dbx.WithDriver(driverName),
 		dbx.WithDSN(cfg.DSN),
 		dbx.WithDialect(d),
 		dbx.ApplyOptions(
@@ -82,7 +74,6 @@ func Open(ctx context.Context, cfg config.DBConfig, logger *slog.Logger) (*dbx.D
 		return nil, dia, fmt.Errorf("dbx open: %w", err)
 	}
 
-	// Ensure the DB is reachable early (dbx.Open already validates configuration; Ping is still useful).
 	if ctx != nil {
 		if err := core.SQLDB().PingContext(ctx); err != nil {
 			if closeErr := core.Close(); closeErr != nil && logger != nil {
@@ -93,4 +84,3 @@ func Open(ctx context.Context, cfg config.DBConfig, logger *slog.Logger) (*dbx.D
 	}
 	return core, dia, nil
 }
-

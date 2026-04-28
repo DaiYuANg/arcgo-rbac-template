@@ -12,6 +12,50 @@ import (
 	"github.com/arcgolabs/dbx/repository"
 )
 
+var userListOrders = map[string]func(bool) querydsl.Order{
+	"id": func(d bool) querydsl.Order {
+		if d {
+			return Users.ID.Desc()
+		}
+		return Users.ID.Asc()
+	},
+	"email": func(d bool) querydsl.Order {
+		if d {
+			return Users.Email.Desc()
+		}
+		return Users.Email.Asc()
+	},
+	"name": func(d bool) querydsl.Order {
+		if d {
+			return Users.Name.Desc()
+		}
+		return Users.Name.Asc()
+	},
+	"createdAt": func(d bool) querydsl.Order {
+		if d {
+			return Users.CreatedAt.Desc()
+		}
+		return Users.CreatedAt.Asc()
+	},
+}
+
+func usersListPredicates(q domain.UsersListQuery) []querydsl.Predicate {
+	preds := make([]querydsl.Predicate, 0, 4)
+	if v := strings.TrimSpace(q.NameLike); v != "" {
+		preds = append(preds, querydsl.Like(Users.Name, "%"+v+"%"))
+	}
+	if v := strings.TrimSpace(q.EmailLike); v != "" {
+		preds = append(preds, querydsl.Like(Users.Email, "%"+v+"%"))
+	}
+	if v := strings.TrimSpace(q.Q); v != "" {
+		preds = append(preds, querydsl.Or(
+			querydsl.Like(Users.Name, "%"+v+"%"),
+			querydsl.Like(Users.Email, "%"+v+"%"),
+		))
+	}
+	return preds
+}
+
 func (r *UserRepo) Get(ctx context.Context, userID domain.UserID) (domain.User, error) {
 	id := strings.TrimSpace(string(userID))
 	if id == "" {
@@ -28,14 +72,10 @@ func (r *UserRepo) Get(ctx context.Context, userID domain.UserID) (domain.User, 
 		From(Users).
 		Where(Users.ID.Eq(id)).
 		Limit(1)
-	items, err := dbx.QueryAll(ctx, r.core, q, mapper.MustStructMapper[row]())
+	first, err := queryOne[row](ctx, r.core, q, "user get")
 	if err != nil {
-		return domain.User{}, fmt.Errorf("user get: %w", err)
+		return domain.User{}, err
 	}
-	if items == nil || items.Len() == 0 {
-		return domain.User{}, domain.ErrNotFound
-	}
-	first, _ := items.Get(0)
 	return domain.User{
 		ID:        domain.UserID(first.ID),
 		Email:     first.Email,
@@ -45,36 +85,21 @@ func (r *UserRepo) Get(ctx context.Context, userID domain.UserID) (domain.User, 
 }
 
 func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Page[domain.User], error) {
-	preds := make([]querydsl.Predicate, 0, 4)
-	if v := strings.TrimSpace(q.NameLike); v != "" {
-		preds = append(preds, querydsl.Like(Users.Name, "%"+v+"%"))
-	}
-	if v := strings.TrimSpace(q.EmailLike); v != "" {
-		preds = append(preds, querydsl.Like(Users.Email, "%"+v+"%"))
-	}
-	if v := strings.TrimSpace(q.Q); v != "" {
-		preds = append(preds, querydsl.Or(
-			querydsl.Like(Users.Name, "%"+v+"%"),
-			querydsl.Like(Users.Email, "%"+v+"%"),
-		))
-	}
-	where := querydsl.And(preds...)
+	where := querydsl.And(usersListPredicates(q)...)
 
-	type countRow struct {
-		Total int64 `dbx:"total"`
-	}
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
 		From(Users).
 		Where(where)
-	countItems, err := dbx.QueryAll(ctx, r.core, countQuery, mapper.MustStructMapper[countRow]())
+	total, err := countTotal(ctx, r.core, countQuery)
 	if err != nil {
 		return domain.Page[domain.User]{}, fmt.Errorf("user list count: %w", err)
 	}
-	total := int64(0)
-	if countItems != nil && countItems.Len() > 0 {
-		first, _ := countItems.Get(0)
-		total = first.Total
+
+	desc := q.Order == domain.SortDesc
+	ord, oerr := listOrderBy(q.Sort, desc, userListOrders)
+	if oerr != nil {
+		return domain.Page[domain.User]{}, fmt.Errorf("user list: %w", oerr)
 	}
 
 	type row struct {
@@ -87,44 +112,8 @@ func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Pa
 		Select(Users.ID, Users.Email, Users.Name, Users.CreatedAt).
 		From(Users).
 		Where(where).
-		PageBy(int(q.Page), int(q.PageSize))
-
-	desc := q.Order == domain.SortDesc
-	sortKey := strings.TrimSpace(q.Sort)
-	if sortKey == "" {
-		sortKey = "id"
-	}
-	orders := map[string]func(bool) querydsl.Order{
-		"id": func(d bool) querydsl.Order {
-			if d {
-				return Users.ID.Desc()
-			}
-			return Users.ID.Asc()
-		},
-		"email": func(d bool) querydsl.Order {
-			if d {
-				return Users.Email.Desc()
-			}
-			return Users.Email.Asc()
-		},
-		"name": func(d bool) querydsl.Order {
-			if d {
-				return Users.Name.Desc()
-			}
-			return Users.Name.Asc()
-		},
-		"createdAt": func(d bool) querydsl.Order {
-			if d {
-				return Users.CreatedAt.Desc()
-			}
-			return Users.CreatedAt.Asc()
-		},
-	}
-	orderFn, ok := orders[sortKey]
-	if !ok {
-		return domain.Page[domain.User]{}, fmt.Errorf("user list: invalid sort field: %s", q.Sort)
-	}
-	listQuery = listQuery.OrderBy(orderFn(desc))
+		PageBy(int(q.Page), int(q.PageSize)).
+		OrderBy(ord)
 
 	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
 	if err != nil {

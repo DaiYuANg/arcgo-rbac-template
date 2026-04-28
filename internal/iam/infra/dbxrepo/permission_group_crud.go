@@ -12,6 +12,41 @@ import (
 	"github.com/arcgolabs/dbx/repository"
 )
 
+var permissionGroupListOrders = map[string]func(bool) querydsl.Order{
+	"id": func(d bool) querydsl.Order {
+		if d {
+			return PermissionGroups.ID.Desc()
+		}
+		return PermissionGroups.ID.Asc()
+	},
+	"name": func(d bool) querydsl.Order {
+		if d {
+			return PermissionGroups.Name.Desc()
+		}
+		return PermissionGroups.Name.Asc()
+	},
+	"createdAt": func(d bool) querydsl.Order {
+		if d {
+			return PermissionGroups.CreatedAt.Desc()
+		}
+		return PermissionGroups.CreatedAt.Asc()
+	},
+}
+
+func permissionGroupListPredicates(q domain.PermissionGroupsListQuery) []querydsl.Predicate {
+	preds := make([]querydsl.Predicate, 0, 3)
+	if v := strings.TrimSpace(q.NameLike); v != "" {
+		preds = append(preds, querydsl.Like(PermissionGroups.Name, "%"+v+"%"))
+	}
+	if v := strings.TrimSpace(q.Q); v != "" {
+		preds = append(preds, querydsl.Or(
+			querydsl.Like(PermissionGroups.Name, "%"+v+"%"),
+			querydsl.Like(PermissionGroups.Description, "%"+v+"%"),
+		))
+	}
+	return preds
+}
+
 func (r *PermissionGroupRepo) Get(ctx context.Context, groupID domain.PermissionGroupID) (domain.PermissionGroup, error) {
 	id := strings.TrimSpace(string(groupID))
 	if id == "" {
@@ -28,14 +63,10 @@ func (r *PermissionGroupRepo) Get(ctx context.Context, groupID domain.Permission
 		From(PermissionGroups).
 		Where(PermissionGroups.ID.Eq(id)).
 		Limit(1)
-	items, err := dbx.QueryAll(ctx, r.core, q, mapper.MustStructMapper[row]())
+	first, err := queryOne[row](ctx, r.core, q, "permission group get")
 	if err != nil {
-		return domain.PermissionGroup{}, fmt.Errorf("permission group get: %w", err)
+		return domain.PermissionGroup{}, err
 	}
-	if items == nil || items.Len() == 0 {
-		return domain.PermissionGroup{}, domain.ErrNotFound
-	}
-	first, _ := items.Get(0)
 	return domain.PermissionGroup{
 		ID:          domain.PermissionGroupID(first.ID),
 		Name:        first.Name,
@@ -45,33 +76,21 @@ func (r *PermissionGroupRepo) Get(ctx context.Context, groupID domain.Permission
 }
 
 func (r *PermissionGroupRepo) List(ctx context.Context, q domain.PermissionGroupsListQuery) (domain.Page[domain.PermissionGroup], error) {
-	preds := make([]querydsl.Predicate, 0, 3)
-	if v := strings.TrimSpace(q.NameLike); v != "" {
-		preds = append(preds, querydsl.Like(PermissionGroups.Name, "%"+v+"%"))
-	}
-	if v := strings.TrimSpace(q.Q); v != "" {
-		preds = append(preds, querydsl.Or(
-			querydsl.Like(PermissionGroups.Name, "%"+v+"%"),
-			querydsl.Like(PermissionGroups.Description, "%"+v+"%"),
-		))
-	}
-	where := querydsl.And(preds...)
+	where := querydsl.And(permissionGroupListPredicates(q)...)
 
-	type countRow struct {
-		Total int64 `dbx:"total"`
-	}
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
 		From(PermissionGroups).
 		Where(where)
-	countItems, err := dbx.QueryAll(ctx, r.core, countQuery, mapper.MustStructMapper[countRow]())
+	total, err := countTotal(ctx, r.core, countQuery)
 	if err != nil {
 		return domain.Page[domain.PermissionGroup]{}, fmt.Errorf("permission group list count: %w", err)
 	}
-	total := int64(0)
-	if countItems != nil && countItems.Len() > 0 {
-		first, _ := countItems.Get(0)
-		total = first.Total
+
+	desc := q.Order == domain.SortDesc
+	ord, oerr := listOrderBy(q.Sort, desc, permissionGroupListOrders)
+	if oerr != nil {
+		return domain.Page[domain.PermissionGroup]{}, fmt.Errorf("permission group list: %w", oerr)
 	}
 
 	type row struct {
@@ -84,38 +103,8 @@ func (r *PermissionGroupRepo) List(ctx context.Context, q domain.PermissionGroup
 		Select(PermissionGroups.ID, PermissionGroups.Name, PermissionGroups.Description, PermissionGroups.CreatedAt).
 		From(PermissionGroups).
 		Where(where).
-		PageBy(int(q.Page), int(q.PageSize))
-
-	desc := q.Order == domain.SortDesc
-	sortKey := strings.TrimSpace(q.Sort)
-	if sortKey == "" {
-		sortKey = "id"
-	}
-	orders := map[string]func(bool) querydsl.Order{
-		"id": func(d bool) querydsl.Order {
-			if d {
-				return PermissionGroups.ID.Desc()
-			}
-			return PermissionGroups.ID.Asc()
-		},
-		"name": func(d bool) querydsl.Order {
-			if d {
-				return PermissionGroups.Name.Desc()
-			}
-			return PermissionGroups.Name.Asc()
-		},
-		"createdAt": func(d bool) querydsl.Order {
-			if d {
-				return PermissionGroups.CreatedAt.Desc()
-			}
-			return PermissionGroups.CreatedAt.Asc()
-		},
-	}
-	orderFn, ok := orders[sortKey]
-	if !ok {
-		return domain.Page[domain.PermissionGroup]{}, fmt.Errorf("permission group list: invalid sort field: %s", q.Sort)
-	}
-	listQuery = listQuery.OrderBy(orderFn(desc))
+		PageBy(int(q.Page), int(q.PageSize)).
+		OrderBy(ord)
 
 	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
 	if err != nil {

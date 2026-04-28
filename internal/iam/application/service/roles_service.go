@@ -51,8 +51,8 @@ func (s *rolesService) Create(ctx context.Context, r domain.Role, groupIDs []dom
 	if err != nil {
 		return domain.Role{}, nil, fmt.Errorf("create role: %w", err)
 	}
-	if err := s.roles.ReplacePermissionGroups(ctx, created.ID, groupIDs); err != nil {
-		return domain.Role{}, nil, fmt.Errorf("replace role groups: %w", err)
+	if rerr := s.roles.ReplacePermissionGroups(ctx, created.ID, groupIDs); rerr != nil {
+		return domain.Role{}, nil, fmt.Errorf("replace role groups: %w", rerr)
 	}
 	out, err := s.roles.ListPermissionGroups(ctx, created.ID)
 	if err != nil {
@@ -68,8 +68,8 @@ func (s *rolesService) Update(ctx context.Context, r domain.Role, groupIDs []dom
 	if err != nil {
 		return domain.Role{}, nil, fmt.Errorf("update role: %w", err)
 	}
-	if err := s.roles.ReplacePermissionGroups(ctx, updated.ID, groupIDs); err != nil {
-		return domain.Role{}, nil, fmt.Errorf("replace role groups: %w", err)
+	if rerr := s.roles.ReplacePermissionGroups(ctx, updated.ID, groupIDs); rerr != nil {
+		return domain.Role{}, nil, fmt.Errorf("replace role groups: %w", rerr)
 	}
 	out, err := s.roles.ListPermissionGroups(ctx, updated.ID)
 	if err != nil {

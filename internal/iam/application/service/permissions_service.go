@@ -54,17 +54,7 @@ func (s *permissionsService) Create(ctx context.Context, p domain.Permission, gr
 	if err != nil {
 		return domain.Permission{}, nil, fmt.Errorf("create permission: %w", err)
 	}
-	if err := s.perms.ReplaceGroup(ctx, created.ID, groupID); err != nil {
-		return domain.Permission{}, nil, fmt.Errorf("replace permission group: %w", err)
-	}
-	out, ok, err := s.perms.GetGroupID(ctx, created.ID)
-	if err != nil {
-		return domain.Permission{}, nil, fmt.Errorf("permission group lookup: %w", err)
-	}
-	if !ok {
-		return created, nil, nil
-	}
-	return created, &out, nil
+	return s.permissionAfterWrite(ctx, created, created.ID, groupID)
 }
 
 func (s *permissionsService) Update(ctx context.Context, p domain.Permission, groupID *domain.PermissionGroupID) (domain.Permission, *domain.PermissionGroupID, error) {
@@ -74,17 +64,21 @@ func (s *permissionsService) Update(ctx context.Context, p domain.Permission, gr
 	if err != nil {
 		return domain.Permission{}, nil, fmt.Errorf("update permission: %w", err)
 	}
-	if err := s.perms.ReplaceGroup(ctx, updated.ID, groupID); err != nil {
-		return domain.Permission{}, nil, fmt.Errorf("replace permission group: %w", err)
+	return s.permissionAfterWrite(ctx, updated, updated.ID, groupID)
+}
+
+func (s *permissionsService) permissionAfterWrite(ctx context.Context, saved domain.Permission, permID domain.PermissionID, groupID *domain.PermissionGroupID) (domain.Permission, *domain.PermissionGroupID, error) {
+	if replErr := s.perms.ReplaceGroup(ctx, permID, groupID); replErr != nil {
+		return domain.Permission{}, nil, fmt.Errorf("replace permission group: %w", replErr)
 	}
-	out, ok, err := s.perms.GetGroupID(ctx, updated.ID)
-	if err != nil {
-		return domain.Permission{}, nil, fmt.Errorf("permission group lookup: %w", err)
+	out, ok, gerr := s.perms.GetGroupID(ctx, permID)
+	if gerr != nil {
+		return domain.Permission{}, nil, fmt.Errorf("permission group lookup: %w", gerr)
 	}
 	if !ok {
-		return updated, nil, nil
+		return saved, nil, nil
 	}
-	return updated, &out, nil
+	return saved, &out, nil
 }
 
 func (s *permissionsService) Delete(ctx context.Context, permID domain.PermissionID) error {

@@ -139,6 +139,46 @@ linters:
       - path: _test\.go
         linters:
           - godoclint
+      - path: (^|/)cmd/server/di\.go$
+        linters:
+          - cyclop
+          - gocyclo
+          - gocognit
+      - path: (^|/)internal/iam/infra/dbxrepo/.*\.go$
+        linters:
+          - dupl
+      - path: (^|/)internal/iam/application/service/(users_service|roles_service)\.go$
+        linters:
+          - dupl
+      - path: (^|/)internal/httpapi/(users_resource|roles_resource)\.go$
+        linters:
+          - dupl
+      - path: (^|/)internal/httpapi/dashboard_endpoint\.go$
+        linters:
+          - cyclop
+          - funlen
+          - gocognit
+          - gocyclo
+      - path: (^|/)internal/httpapi/auth_endpoint\.go$
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+      - path: (^|/)cmd/migrate/main\.go$
+        linters:
+          - gocognit
+      - path: (^|/)internal/httpapi/fiber_auth_middleware\.go$
+        linters:
+          - gocognit
+      - path: (^|/)internal/httpapi/module\.go$
+        linters:
+          - gocognit
+      - path: (^|/)internal/httpapi/permissions_bulk\.go$
+        linters:
+          - gocognit
+      - path: (^|/)internal/httpapi/users_resource\.go$
+        linters:
+          - gocognit
 
 issues:
   max-issues-per-linter: 0

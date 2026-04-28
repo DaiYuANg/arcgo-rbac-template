@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/arcgolabs/authx"
@@ -75,7 +74,7 @@ func (e *PermissionsResource) ListOrGetMany(ctx context.Context, in *permListInp
 
 func (e *PermissionsResource) List(ctx context.Context, in *permListInput) (*PageResponse[PermissionDTO], error) {
 	if in.Page <= 0 || in.PageSize <= 0 {
-		return nil, httpx.NewError(400, "validation", fmt.Errorf("page and pageSize are required"))
+		return nil, httpx.NewError(400, "validation", errors.New("page and pageSize are required"))
 	}
 	page, err := e.svc.List(ctx, domain.PermissionsListQuery{
 		PageParams: domain.PageParams{Page: in.Page, PageSize: in.PageSize},
@@ -259,56 +258,6 @@ func (e *PermissionsResource) UpdateByID(ctx context.Context, in *updatePermInpu
 	return e.Update(ctx, in)
 }
 
-type updatePermBulkInput struct {
-	ID   string `query:"id"`
-	Body struct {
-		GroupID *string `json:"groupId"`
-	} `json:"body"`
-}
-
-func (e *PermissionsResource) UpdateMany(ctx context.Context, in *updatePermBulkInput) (*[]PermissionDTO, error) {
-	if err := enforce(ctx, e.engine, "permissions:write", "/permissions"); err != nil {
-		return nil, err
-	}
-	ids := splitIDs(in.ID)
-	out := make([]PermissionDTO, 0, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		p, _, err := e.svc.Get(ctx, domain.PermissionID(id))
-		if err != nil {
-			continue
-		}
-		var gid *domain.PermissionGroupID
-		if in.Body.GroupID != nil {
-			v := strings.TrimSpace(*in.Body.GroupID)
-			if v != "" {
-				tmp := domain.PermissionGroupID(v)
-				gid = &tmp
-			}
-		}
-		updated, outGID, uerr := e.svc.Update(ctx, domain.Permission{ID: p.ID, Name: p.Name, Code: p.Code}, gid)
-		if uerr != nil {
-			return nil, uerr
-		}
-		var groupID *string
-		if outGID != nil {
-			v := string(*outGID)
-			groupID = &v
-		}
-		out = append(out, PermissionDTO{
-			ID:        string(updated.ID),
-			Name:      updated.Name,
-			Code:      updated.Code,
-			GroupID:   groupID,
-			CreatedAt: unixMilliToRFC3339(updated.CreatedAt),
-		})
-	}
-	return &out, nil
-}
-
 func (e *PermissionsResource) Delete(ctx context.Context, in *userIDPath) (*struct{}, error) {
 	if err := enforce(ctx, e.engine, "permissions:write", "/permissions"); err != nil {
 		return nil, err
@@ -323,22 +272,3 @@ func (e *PermissionsResource) Delete(ctx context.Context, in *userIDPath) (*stru
 func (e *PermissionsResource) DeleteByID(ctx context.Context, in *userIDPath) (*struct{}, error) {
 	return e.Delete(ctx, in)
 }
-
-func (e *PermissionsResource) DeleteMany(ctx context.Context, in *idsQuery) (*[]PermissionDTO, error) {
-	if err := enforce(ctx, e.engine, "permissions:write", "/permissions"); err != nil {
-		return nil, err
-	}
-	ids := splitIDs(in.ID)
-	out := make([]PermissionDTO, 0, len(ids))
-	for _, id := range ids {
-		item, err := e.Get(ctx, &userIDPath{ID: id})
-		if err == nil && item != nil {
-			out = append(out, *item)
-		}
-		if _, err := e.Delete(ctx, &userIDPath{ID: id}); err != nil {
-			return nil, err
-		}
-	}
-	return &out, nil
-}
-

@@ -12,6 +12,41 @@ import (
 	"github.com/arcgolabs/dbx/repository"
 )
 
+var roleListOrders = map[string]func(bool) querydsl.Order{
+	"id": func(d bool) querydsl.Order {
+		if d {
+			return Roles.ID.Desc()
+		}
+		return Roles.ID.Asc()
+	},
+	"name": func(d bool) querydsl.Order {
+		if d {
+			return Roles.Name.Desc()
+		}
+		return Roles.Name.Asc()
+	},
+	"createdAt": func(d bool) querydsl.Order {
+		if d {
+			return Roles.CreatedAt.Desc()
+		}
+		return Roles.CreatedAt.Asc()
+	},
+}
+
+func rolesListPredicates(q domain.RolesListQuery) []querydsl.Predicate {
+	preds := make([]querydsl.Predicate, 0, 3)
+	if v := strings.TrimSpace(q.NameLike); v != "" {
+		preds = append(preds, querydsl.Like(Roles.Name, "%"+v+"%"))
+	}
+	if v := strings.TrimSpace(q.Q); v != "" {
+		preds = append(preds, querydsl.Or(
+			querydsl.Like(Roles.Name, "%"+v+"%"),
+			querydsl.Like(Roles.Description, "%"+v+"%"),
+		))
+	}
+	return preds
+}
+
 func (r *RoleRepo) Get(ctx context.Context, roleID domain.RoleID) (domain.Role, error) {
 	id := strings.TrimSpace(string(roleID))
 	if id == "" {
@@ -28,14 +63,10 @@ func (r *RoleRepo) Get(ctx context.Context, roleID domain.RoleID) (domain.Role, 
 		From(Roles).
 		Where(Roles.ID.Eq(id)).
 		Limit(1)
-	items, err := dbx.QueryAll(ctx, r.core, q, mapper.MustStructMapper[row]())
+	first, err := queryOne[row](ctx, r.core, q, "role get")
 	if err != nil {
-		return domain.Role{}, fmt.Errorf("role get: %w", err)
+		return domain.Role{}, err
 	}
-	if items == nil || items.Len() == 0 {
-		return domain.Role{}, domain.ErrNotFound
-	}
-	first, _ := items.Get(0)
 	return domain.Role{
 		ID:          domain.RoleID(first.ID),
 		Name:        first.Name,
@@ -45,33 +76,21 @@ func (r *RoleRepo) Get(ctx context.Context, roleID domain.RoleID) (domain.Role, 
 }
 
 func (r *RoleRepo) List(ctx context.Context, q domain.RolesListQuery) (domain.Page[domain.Role], error) {
-	preds := make([]querydsl.Predicate, 0, 3)
-	if v := strings.TrimSpace(q.NameLike); v != "" {
-		preds = append(preds, querydsl.Like(Roles.Name, "%"+v+"%"))
-	}
-	if v := strings.TrimSpace(q.Q); v != "" {
-		preds = append(preds, querydsl.Or(
-			querydsl.Like(Roles.Name, "%"+v+"%"),
-			querydsl.Like(Roles.Description, "%"+v+"%"),
-		))
-	}
-	where := querydsl.And(preds...)
+	where := querydsl.And(rolesListPredicates(q)...)
 
-	type countRow struct {
-		Total int64 `dbx:"total"`
-	}
 	countQuery := querydsl.
 		Select(querydsl.CountAll().As("total")).
 		From(Roles).
 		Where(where)
-	countItems, err := dbx.QueryAll(ctx, r.core, countQuery, mapper.MustStructMapper[countRow]())
+	total, err := countTotal(ctx, r.core, countQuery)
 	if err != nil {
 		return domain.Page[domain.Role]{}, fmt.Errorf("role list count: %w", err)
 	}
-	total := int64(0)
-	if countItems != nil && countItems.Len() > 0 {
-		first, _ := countItems.Get(0)
-		total = first.Total
+
+	desc := q.Order == domain.SortDesc
+	ord, oerr := listOrderBy(q.Sort, desc, roleListOrders)
+	if oerr != nil {
+		return domain.Page[domain.Role]{}, fmt.Errorf("role list: %w", oerr)
 	}
 
 	type row struct {
@@ -84,38 +103,8 @@ func (r *RoleRepo) List(ctx context.Context, q domain.RolesListQuery) (domain.Pa
 		Select(Roles.ID, Roles.Name, Roles.Description, Roles.CreatedAt).
 		From(Roles).
 		Where(where).
-		PageBy(int(q.Page), int(q.PageSize))
-
-	desc := q.Order == domain.SortDesc
-	sortKey := strings.TrimSpace(q.Sort)
-	if sortKey == "" {
-		sortKey = "id"
-	}
-	orders := map[string]func(bool) querydsl.Order{
-		"id": func(d bool) querydsl.Order {
-			if d {
-				return Roles.ID.Desc()
-			}
-			return Roles.ID.Asc()
-		},
-		"name": func(d bool) querydsl.Order {
-			if d {
-				return Roles.Name.Desc()
-			}
-			return Roles.Name.Asc()
-		},
-		"createdAt": func(d bool) querydsl.Order {
-			if d {
-				return Roles.CreatedAt.Desc()
-			}
-			return Roles.CreatedAt.Asc()
-		},
-	}
-	orderFn, ok := orders[sortKey]
-	if !ok {
-		return domain.Page[domain.Role]{}, fmt.Errorf("role list: invalid sort field: %s", q.Sort)
-	}
-	listQuery = listQuery.OrderBy(orderFn(desc))
+		PageBy(int(q.Page), int(q.PageSize)).
+		OrderBy(ord)
 
 	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
 	if err != nil {

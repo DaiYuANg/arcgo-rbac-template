@@ -68,6 +68,68 @@ type KVConfig struct {
 	DefaultTTL time.Duration
 }
 
+// legacyRaw mirrors configx hierarchical keys (.env legacy names map via WithEnvSeparator).
+type legacyRaw struct {
+	HTTP struct {
+		Addr string `mapstructure:"addr"`
+	} `mapstructure:"http"`
+
+	DB struct {
+		Driver string `mapstructure:"driver"`
+		DSN    string `mapstructure:"dsn"`
+	} `mapstructure:"db"`
+
+	JWT struct {
+		Secret   string `mapstructure:"secret"`
+		Issuer   string `mapstructure:"issuer"`
+		Audience string `mapstructure:"audience"`
+	} `mapstructure:"jwt"`
+
+	Access struct {
+		Token struct {
+			TTL time.Duration `mapstructure:"ttl"`
+		} `mapstructure:"token"`
+	} `mapstructure:"access"`
+
+	Refresh struct {
+		Token struct {
+			TTL time.Duration `mapstructure:"ttl"`
+		} `mapstructure:"token"`
+	} `mapstructure:"refresh"`
+
+	KV struct {
+		Enabled    bool          `mapstructure:"enabled"`
+		Driver     string        `mapstructure:"driver"`
+		Addr       string        `mapstructure:"addr"`
+		Password   string        `mapstructure:"password"`
+		DB         int           `mapstructure:"db"`
+		Prefix     string        `mapstructure:"prefix"`
+		DefaultTTL time.Duration `mapstructure:"default_ttl"`
+	} `mapstructure:"kv"`
+
+	Allow struct {
+		Insecure struct {
+			Dev bool `mapstructure:"dev"`
+		} `mapstructure:"insecure"`
+	} `mapstructure:"allow"`
+
+	Auth struct {
+		Sources string `mapstructure:"sources"`
+		Root    struct {
+			Username string `mapstructure:"username"`
+			Password string `mapstructure:"password"`
+		} `mapstructure:"root"`
+	} `mapstructure:"auth"`
+
+	Bootstrap struct {
+		Admin struct {
+			User struct {
+				ID string `mapstructure:"id"`
+			} `mapstructure:"user"`
+		} `mapstructure:"admin"`
+	} `mapstructure:"bootstrap"`
+}
+
 // Load loads typed config using configx (dotenv → file → env → args).
 // This is intended to be called from a dix provider.
 func Load() (Config, error) {
@@ -75,68 +137,7 @@ func Load() (Config, error) {
 	// (unless you set WithEnvSeparator("__")). This template keeps legacy flat env
 	// var names (JWT_SECRET, ACCESS_TOKEN_TTL, BOOTSTRAP_ADMIN_USER_ID, ...) and
 	// maps them through a raw hierarchical shape compatible with configx.
-	type rawConfig struct {
-		HTTP struct {
-			Addr string `mapstructure:"addr"`
-		} `mapstructure:"http"`
-
-		DB struct {
-			Driver string `mapstructure:"driver"`
-			DSN    string `mapstructure:"dsn"`
-		} `mapstructure:"db"`
-
-		JWT struct {
-			Secret   string `mapstructure:"secret"`
-			Issuer   string `mapstructure:"issuer"`
-			Audience string `mapstructure:"audience"`
-		} `mapstructure:"jwt"`
-
-		Access struct {
-			Token struct {
-				TTL time.Duration `mapstructure:"ttl"`
-			} `mapstructure:"token"`
-		} `mapstructure:"access"`
-
-		Refresh struct {
-			Token struct {
-				TTL time.Duration `mapstructure:"ttl"`
-			} `mapstructure:"token"`
-		} `mapstructure:"refresh"`
-
-		KV struct {
-			Enabled    bool          `mapstructure:"enabled"`
-			Driver     string        `mapstructure:"driver"`
-			Addr       string        `mapstructure:"addr"`
-			Password   string        `mapstructure:"password"`
-			DB         int           `mapstructure:"db"`
-			Prefix     string        `mapstructure:"prefix"`
-			DefaultTTL time.Duration `mapstructure:"default_ttl"`
-		} `mapstructure:"kv"`
-
-		Allow struct {
-			Insecure struct {
-				Dev bool `mapstructure:"dev"`
-			} `mapstructure:"insecure"`
-		} `mapstructure:"allow"`
-
-		Auth struct {
-			Sources string `mapstructure:"sources"`
-			Root    struct {
-				Username string `mapstructure:"username"`
-				Password string `mapstructure:"password"`
-			} `mapstructure:"root"`
-		} `mapstructure:"auth"`
-
-		Bootstrap struct {
-			Admin struct {
-				User struct {
-					ID string `mapstructure:"id"`
-				} `mapstructure:"user"`
-			} `mapstructure:"admin"`
-		} `mapstructure:"bootstrap"`
-	}
-
-	raw, err := configx.LoadTErr[rawConfig](
+	raw, err := configx.LoadTErr[legacyRaw](
 		// default order: dotenv → file → env → args
 		// We keep files empty by default; callers can add configx.WithFiles(...) later.
 		configx.WithDotenv(".env", ".env.local"),
@@ -170,7 +171,25 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	cfg := Config{
+	return finalizeLoadedConfig(raw)
+}
+
+func finalizeLoadedConfig(raw legacyRaw) (Config, error) {
+	cfg := buildConfigFromRaw(raw)
+
+	compatMemorySQLite(&cfg)
+
+	if err := ensureJWTSecret(&cfg); err != nil {
+		return Config{}, err
+	}
+	if err := ensureNonEmptyDSN(&cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func buildConfigFromRaw(raw legacyRaw) Config {
+	return Config{
 		HTTP: HTTPConfig{Addr: strings.TrimSpace(raw.HTTP.Addr)},
 		DB: DBConfig{
 			Driver: strings.TrimSpace(raw.DB.Driver),
@@ -200,32 +219,38 @@ func Load() (Config, error) {
 			BootstrappedAdminUserID: strings.TrimSpace(raw.Bootstrap.Admin.User.ID),
 		},
 	}
+}
 
-	// Compatibility: treat DB_DRIVER=memory as sqlite in-memory.
-	if strings.EqualFold(cfg.DB.Driver, "memory") {
-		cfg.DB.Driver = "sqlite"
-		if strings.TrimSpace(cfg.DB.DSN) == "" {
-			cfg.DB.DSN = "file::memory:?cache=shared"
-		}
+func compatMemorySQLite(cfg *Config) {
+	if !strings.EqualFold(cfg.DB.Driver, "memory") {
+		return
 	}
+	cfg.DB.Driver = "sqlite"
+	if strings.TrimSpace(cfg.DB.DSN) == "" {
+		cfg.DB.DSN = "file::memory:?cache=shared"
+	}
+}
 
-	if cfg.Auth.JWTSecret == "" && !cfg.Auth.AllowInsecureDev {
-		return Config{}, errors.New("JWT_SECRET is required when ALLOW_INSECURE_DEV=false")
+func ensureJWTSecret(cfg *Config) error {
+	if cfg.Auth.JWTSecret != "" {
+		return nil
 	}
-	if cfg.Auth.JWTSecret == "" && cfg.Auth.AllowInsecureDev {
-		cfg.Auth.JWTSecret = "dev-secret-change-me"
+	if !cfg.Auth.AllowInsecureDev {
+		return errors.New("JWT_SECRET is required when ALLOW_INSECURE_DEV=false")
 	}
+	cfg.Auth.JWTSecret = "dev-secret-change-me"
+	return nil
+}
 
-	if cfg.DB.Driver != "memory" && strings.TrimSpace(cfg.DB.DSN) == "" {
-		// Give a sensible default for SQLite so "just run it" works.
-		if cfg.DB.Driver == "sqlite" {
-			cfg.DB.DSN = "file:rbac.db?_pragma=busy_timeout(5000)"
-		} else {
-			return Config{}, fmt.Errorf("DB_DSN is required when DB_DRIVER=%s", cfg.DB.Driver)
-		}
+func ensureNonEmptyDSN(cfg *Config) error {
+	if cfg.DB.Driver == "memory" || strings.TrimSpace(cfg.DB.DSN) != "" {
+		return nil
 	}
-
-	return cfg, nil
+	if cfg.DB.Driver == "sqlite" {
+		cfg.DB.DSN = "file:rbac.db?_pragma=busy_timeout(5000)"
+		return nil
+	}
+	return fmt.Errorf("DB_DSN is required when DB_DRIVER=%s", cfg.DB.Driver)
 }
 
 // FromEnv is kept for backward compatibility; it delegates to Load().

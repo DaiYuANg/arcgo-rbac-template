@@ -25,33 +25,52 @@ func NewPasswordProvider(cfg config.Config, core *dbx.DB) authx.AuthenticationPr
 		}
 
 		sources := normalizeSources(cfg.Auth.Sources)
-		if sources["root"] && checkRoot(cfg, username, password) {
-			return authx.AuthenticationResult{
-				Principal: authx.Principal{
-					ID:    username,
-					Roles: collectionx.NewList[string]("admin"),
-				},
-			}, nil
-		}
 
-		if sources["db"] {
-			if core == nil {
-				return authx.AuthenticationResult{}, errors.New("db auth enabled but database is nil")
-			}
-			p, ok, err := checkDBUser(ctx, core, username, password)
-			if err != nil {
-				if errors.Is(err, authx.ErrUnauthenticated) {
-					return authx.AuthenticationResult{}, authx.ErrUnauthenticated
-				}
-				return authx.AuthenticationResult{}, err
-			}
-			if ok {
-				return authx.AuthenticationResult{Principal: p}, nil
-			}
+		out, handled := authenticateRoot(cfg, sources, username, password)
+		if handled {
+			return out, nil
 		}
-
-		return authx.AuthenticationResult{}, authx.ErrUnauthenticated
+		return authenticateDBFlow(ctx, sources, cfg, core, username, password)
 	})
+}
+
+func authenticateRoot(cfg config.Config, sources map[string]bool, username, password string) (authx.AuthenticationResult, bool) {
+	if !sources["root"] || !checkRoot(cfg, username, password) {
+		return authx.AuthenticationResult{}, false
+	}
+	return authx.AuthenticationResult{
+		Principal: authx.Principal{
+			ID:    username,
+			Roles: collectionx.NewList[string]("admin"),
+		},
+	}, true
+}
+
+func authenticateDBFlow(
+	ctx context.Context,
+	sources map[string]bool,
+	cfg config.Config,
+	core *dbx.DB,
+	username, password string,
+) (authx.AuthenticationResult, error) {
+	_ = cfg
+	if !sources["db"] {
+		return authx.AuthenticationResult{}, authx.ErrUnauthenticated
+	}
+	if core == nil {
+		return authx.AuthenticationResult{}, errors.New("db auth enabled but database is nil")
+	}
+	p, ok, err := checkDBUser(ctx, core, username, password)
+	if err != nil {
+		if errors.Is(err, authx.ErrUnauthenticated) {
+			return authx.AuthenticationResult{}, authx.ErrUnauthenticated
+		}
+		return authx.AuthenticationResult{}, err
+	}
+	if !ok {
+		return authx.AuthenticationResult{}, authx.ErrUnauthenticated
+	}
+	return authx.AuthenticationResult{Principal: p}, nil
 }
 
 func normalizeSources(s string) map[string]bool {
@@ -75,7 +94,6 @@ func checkRoot(cfg config.Config, username, password string) bool {
 }
 
 func checkDBUser(ctx context.Context, core *dbx.DB, username, password string) (authx.Principal, bool, error) {
-	// roles is stored as comma-separated string.
 	if core == nil || core.SQLDB() == nil || core.Dialect() == nil {
 		return authx.Principal{}, false, errors.New("db core not ready")
 	}
@@ -108,4 +126,3 @@ func checkDBUser(ctx context.Context, core *dbx.DB, username, password string) (
 		Roles: roleList,
 	}, true, nil
 }
-

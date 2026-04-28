@@ -51,8 +51,8 @@ func (s *usersService) Create(ctx context.Context, u domain.User, roleIDs []doma
 	if err != nil {
 		return domain.User{}, nil, fmt.Errorf("create user: %w", err)
 	}
-	if err := s.users.ReplaceRoles(ctx, created.ID, roleIDs); err != nil {
-		return domain.User{}, nil, fmt.Errorf("replace user roles: %w", err)
+	if rerr := s.users.ReplaceRoles(ctx, created.ID, roleIDs); rerr != nil {
+		return domain.User{}, nil, fmt.Errorf("replace user roles: %w", rerr)
 	}
 	outRoles, err := s.users.ListRoles(ctx, created.ID)
 	if err != nil {
@@ -68,8 +68,8 @@ func (s *usersService) Update(ctx context.Context, u domain.User, roleIDs []doma
 	if err != nil {
 		return domain.User{}, nil, fmt.Errorf("update user: %w", err)
 	}
-	if err := s.users.ReplaceRoles(ctx, updated.ID, roleIDs); err != nil {
-		return domain.User{}, nil, fmt.Errorf("replace user roles: %w", err)
+	if rerr := s.users.ReplaceRoles(ctx, updated.ID, roleIDs); rerr != nil {
+		return domain.User{}, nil, fmt.Errorf("replace user roles: %w", rerr)
 	}
 	outRoles, err := s.users.ListRoles(ctx, updated.ID)
 	if err != nil {

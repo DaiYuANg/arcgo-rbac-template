@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/arcgolabs/authx"
@@ -74,7 +73,7 @@ func (e *PermissionGroupsResource) ListOrGetMany(ctx context.Context, in *pgList
 
 func (e *PermissionGroupsResource) List(ctx context.Context, in *pgListInput) (*PageResponse[PermissionGroupDTO], error) {
 	if in.Page <= 0 || in.PageSize <= 0 {
-		return nil, httpx.NewError(400, "validation", fmt.Errorf("page and pageSize are required"))
+		return nil, httpx.NewError(400, "validation", errors.New("page and pageSize are required"))
 	}
 	page, err := e.svc.List(ctx, domain.PermissionGroupsListQuery{
 		PageParams: domain.PageParams{Page: in.Page, PageSize: in.PageSize},
