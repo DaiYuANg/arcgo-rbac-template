@@ -2,16 +2,34 @@ package httpapi
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 	"time"
 
+	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
+	collectionlist "github.com/arcgolabs/collectionx/list"
 	"github.com/arcgolabs/dbx"
+	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/httpx"
 	"github.com/danielgtaylor/huma/v2"
 )
 
 type DashboardEndpoint struct {
 	core *dbx.DB
+}
+
+type dashboardCountRow struct {
+	Total int64 `dbx:"total"`
+}
+
+type dashboardRoleDistributionRow struct {
+	Name  string `dbx:"name"`
+	Value int64  `dbx:"value"`
+}
+
+type dashboardPermissionGroupRow struct {
+	Name  string `dbx:"name"`
+	Count int64  `dbx:"count"`
 }
 
 func (e *DashboardEndpoint) EndpointSpec() httpx.EndpointSpec {
@@ -37,20 +55,20 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*JSONBody[D
 		return wrapJSON(out), nil
 	}
 
-	var totalUsers int64
-	if err := e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_users").Scan(&totalUsers); err != nil {
+	totalUsers, err := e.countTable(ctx, dbxrepo.Users)
+	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	var totalRoles int64
-	if err := e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_roles").Scan(&totalRoles); err != nil {
+	totalRoles, err := e.countTable(ctx, dbxrepo.Roles)
+	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	var totalPerms int64
-	if err := e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_permissions").Scan(&totalPerms); err != nil {
+	totalPerms, err := e.countTable(ctx, dbxrepo.Permissions)
+	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	var totalGroups int64
-	if err := e.core.SQLDB().QueryRowContext(ctx, "SELECT COUNT(1) FROM iam_permission_groups").Scan(&totalGroups); err != nil {
+	totalGroups, err := e.countTable(ctx, dbxrepo.PermissionGroups)
+	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
 
@@ -89,63 +107,33 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*JSONBody[D
 	}
 
 	// Role distribution: count users per role (top 6).
-	rows, err := e.core.SQLDB().QueryContext(ctx,
-		`SELECT r.name, COUNT(ur.user_id) AS c
-		 FROM iam_roles r
-		 LEFT JOIN iam_user_roles ur ON ur.role_id = r.id
-		 GROUP BY r.id, r.name
-		 ORDER BY c DESC`)
+	roleRows, err := e.listRoleDistribution(ctx)
 	if err == nil {
-		defer func() {
-			if closeErr := rows.Close(); closeErr != nil {
-				slog.Default().Error("dashboard rows close failed", "error", closeErr)
-			}
-		}()
 		colors := []string{"var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"}
-		colorIdx := 0
-		for rows.Next() {
-			var name string
-			var c int64
-			if scanErr := rows.Scan(&name, &c); scanErr != nil {
-				continue
-			}
-			color := colors[colorIdx%len(colors)]
-			colorIdx++
+		roleRows.Range(func(i int, row dashboardRoleDistributionRow) bool {
 			out.RoleDistribution = append(out.RoleDistribution, struct {
 				Name  string `json:"name"`
 				Value int64  `json:"value"`
 				Color string `json:"color"`
-			}{Name: name, Value: c, Color: color})
-			if len(out.RoleDistribution) >= 6 {
-				break
-			}
-		}
+			}{
+				Name:  row.Name,
+				Value: row.Value,
+				Color: colors[i%len(colors)],
+			})
+			return true
+		})
 	}
 
 	// Permission groups summary: count permissions per group (by mapping table).
-	grows, err := e.core.SQLDB().QueryContext(ctx,
-		`SELECT g.name, COUNT(m.perm_id) AS c
-		 FROM iam_permission_groups g
-		 LEFT JOIN iam_permission_group_permissions m ON m.group_id = g.id
-		 GROUP BY g.id, g.name
-		 ORDER BY c DESC, g.name ASC`)
+	groupRows, err := e.listPermissionGroups(ctx)
 	if err == nil {
-		defer func() {
-			if closeErr := grows.Close(); closeErr != nil {
-				slog.Default().Error("dashboard grows close failed", "error", closeErr)
-			}
-		}()
-		for grows.Next() {
-			var name string
-			var c int64
-			if scanErr := grows.Scan(&name, &c); scanErr != nil {
-				continue
-			}
+		groupRows.Range(func(_ int, row dashboardPermissionGroupRow) bool {
 			out.PermissionGroups = append(out.PermissionGroups, struct {
 				Name  string `json:"name"`
 				Count int64  `json:"count"`
-			}{Name: name, Count: c})
-		}
+			}{Name: row.Name, Count: row.Count})
+			return true
+		})
 	}
 
 	// Ensure non-nil slices for frontend.
@@ -178,4 +166,48 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*JSONBody[D
 	}
 
 	return wrapJSON(out), nil
+}
+
+func (e *DashboardEndpoint) countTable(ctx context.Context, source querydsl.TableSource) (int64, error) {
+	q := querydsl.Select(querydsl.CountAll().As("total")).From(source)
+	items, err := dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardCountRow]())
+	if err != nil {
+		return 0, fmt.Errorf("dashboard count query: %w", err)
+	}
+	if items == nil || items.Len() == 0 {
+		return 0, nil
+	}
+	first, _ := items.Get(0)
+	return first.Total, nil
+}
+
+func (e *DashboardEndpoint) listRoleDistribution(ctx context.Context) (*collectionlist.List[dashboardRoleDistributionRow], error) {
+	userCount := querydsl.Count(dbxrepo.UserRoles.UserID)
+	q := querydsl.
+		Select(
+			dbxrepo.Roles.Name.As("name"),
+			userCount.As("value"),
+		).
+		From(dbxrepo.Roles).
+		LeftJoin(dbxrepo.UserRoles).On(dbxrepo.UserRoles.RoleID.EqColumn(dbxrepo.Roles.ID)).
+		GroupBy(dbxrepo.Roles.ID, dbxrepo.Roles.Name).
+		OrderBy(userCount.Desc()).
+		Limit(6)
+	return dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardRoleDistributionRow]())
+}
+
+func (e *DashboardEndpoint) listPermissionGroups(ctx context.Context) (*collectionlist.List[dashboardPermissionGroupRow], error) {
+	permCount := querydsl.Count(dbxrepo.PermissionGroupPermissions.PermID)
+	q := querydsl.
+		Select(
+			dbxrepo.PermissionGroups.Name.As("name"),
+			permCount.As("count"),
+		).
+		From(dbxrepo.PermissionGroups).
+		LeftJoin(dbxrepo.PermissionGroupPermissions).On(
+			dbxrepo.PermissionGroupPermissions.GroupID.EqColumn(dbxrepo.PermissionGroups.ID),
+		).
+		GroupBy(dbxrepo.PermissionGroups.ID, dbxrepo.PermissionGroups.Name).
+		OrderBy(permCount.Desc(), dbxrepo.PermissionGroups.Name.Asc())
+	return dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardPermissionGroupRow]())
 }
