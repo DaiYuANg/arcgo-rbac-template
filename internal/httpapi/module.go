@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/DaiYuANg/arcgo/kvx"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
@@ -20,8 +21,16 @@ func Module() dix.Module {
 			dix.Provider0(func() *HealthEndpoint { return &HealthEndpoint{} },
 				dix.Into[httpx.Endpoint](dix.Key("health"), dix.Order(-100)),
 			),
-			dix.Provider3(func(cfg config.Config, engine *authx.Engine, cache kvx.KV) *AuthEndpoint {
-				return &AuthEndpoint{cfg: cfg, engine: engine, cache: cache, cachePrefix: cfg.KV.Prefix}
+			dix.Provider5(func(cfg config.Config, engine *authx.Engine, cache kvx.KV, logger *slog.Logger, core *dbx.DB) *AuthEndpoint {
+				return &AuthEndpoint{
+					cfg:         cfg,
+					engine:      engine,
+					cache:       cache,
+					cachePrefix: cfg.KV.Prefix,
+					core:        core,
+					logger:      logger,
+					auditSink:   newAuthAuditSink(core, logger),
+				}
 			}, dix.Into[httpx.Endpoint](dix.Key("auth"), dix.Order(-50))),
 			dix.Provider4(func(cfg config.Config, engine *authx.Engine, svc iamservice.MeService, cache kvx.KV) *MeEndpoint {
 				return &MeEndpoint{engine: engine, svc: svc, cache: cache, cachePrefix: cfg.KV.Prefix, cacheTTL: cfg.KV.DefaultTTL}

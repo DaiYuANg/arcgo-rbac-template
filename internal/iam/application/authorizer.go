@@ -42,11 +42,22 @@ func (a *Authorizer) Can(ctx context.Context, userID domain.UserID, jwtRoles []s
 		return Decision{Allowed: true, Reason: "user permission"}, nil
 	}
 
-	roleIDs, err := a.collectRoleIDs(ctx, userID, jwtRoles)
+	jwtRoleIDs := normalizeRoleIDs(jwtRoles)
+	ok, err = a.hasRolePermission(ctx, jwtRoleIDs, action)
+	if err != nil {
+		return Decision{Allowed: false, Reason: "role permissions lookup failed"}, err
+	}
+	if ok {
+		return Decision{Allowed: true, Reason: "role permission"}, nil
+	}
+
+	dbRoleIDs, err := a.listUserRoleIDs(ctx, userID)
 	if err != nil {
 		return Decision{Allowed: false, Reason: "user roles lookup failed"}, err
 	}
 
+	roleIDs := slices.Clone(jwtRoleIDs)
+	roleIDs = append(roleIDs, dbRoleIDs...)
 	ok, err = a.hasRolePermission(ctx, roleIDs, action)
 	if err != nil {
 		return Decision{Allowed: false, Reason: "role permissions lookup failed"}, err
@@ -65,19 +76,23 @@ func (a *Authorizer) hasDirectUserPermission(ctx context.Context, userID domain.
 	return containsPerm(up, action), nil
 }
 
-func (a *Authorizer) collectRoleIDs(ctx context.Context, userID domain.UserID, jwtRoles []string) ([]domain.RoleID, error) {
-	roles := make([]domain.RoleID, 0, len(jwtRoles)+4)
+func normalizeRoleIDs(jwtRoles []string) []domain.RoleID {
+	roles := make([]domain.RoleID, 0, len(jwtRoles))
 	for _, r := range jwtRoles {
-		r = strings.TrimSpace(r)
-		if r != "" {
-			roles = append(roles, domain.RoleID(r))
+		roleID := domain.RoleID(strings.TrimSpace(r))
+		if roleID != "" {
+			roles = append(roles, roleID)
 		}
 	}
+	return roles
+}
+
+func (a *Authorizer) listUserRoleIDs(ctx context.Context, userID domain.UserID) ([]domain.RoleID, error) {
 	sr, err := a.users.ListRoles(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list user roles: %w", err)
 	}
-	return append(roles, sr...), nil
+	return sr, nil
 }
 
 func (a *Authorizer) hasRolePermission(ctx context.Context, roles []domain.RoleID, action domain.PermissionID) (bool, error) {

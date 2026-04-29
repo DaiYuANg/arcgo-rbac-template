@@ -48,6 +48,13 @@ type AuthConfig struct {
 
 	// RefreshTokenTTL controls cookie refresh token lifetime.
 	RefreshTokenTTL time.Duration
+
+	// LoginRateLimit/LoginRateWindow limit auth login attempts by client+username key.
+	LoginRateLimit  int
+	LoginRateWindow time.Duration
+	// RefreshRateLimit/RefreshRateWindow limit refresh attempts by client key.
+	RefreshRateLimit  int
+	RefreshRateWindow time.Duration
 }
 
 type RBACConfig struct {
@@ -119,6 +126,18 @@ type legacyRaw struct {
 			Username string `mapstructure:"username"`
 			Password string `mapstructure:"password"`
 		} `mapstructure:"root"`
+		Login struct {
+			Rate struct {
+				Limit  int           `mapstructure:"limit"`
+				Window time.Duration `mapstructure:"window"`
+			} `mapstructure:"rate"`
+		} `mapstructure:"login"`
+		Refresh struct {
+			Rate struct {
+				Limit  int           `mapstructure:"limit"`
+				Window time.Duration `mapstructure:"window"`
+			} `mapstructure:"rate"`
+		} `mapstructure:"refresh"`
 	} `mapstructure:"auth"`
 
 	Bootstrap struct {
@@ -146,25 +165,29 @@ func Load() (Config, error) {
 		configx.WithEnvPrefix(""),
 		configx.WithEnvSeparator("_"),
 		configx.WithDefaults(map[string]any{
-			"http.addr":               ":8080",
-			"db.driver":               "sqlite",
-			"db.dsn":                  "file:rbac.db?_pragma=busy_timeout(5000)",
-			"jwt.issuer":              "arcgo-rbac-template",
-			"jwt.audience":            "arcgo",
-			"access.token.ttl":        "30m",
-			"refresh.token.ttl":       "168h",
-			"allow.insecure.dev":      true,
-			"auth.sources":            "root,db",
-			"auth.root.username":      "root",
-			"auth.root.password":      "root",
-			"bootstrap.admin.user.id": "admin",
-			"kv.enabled":              false,
-			"kv.driver":               "valkey",
-			"kv.addr":                 "127.0.0.1:6379",
-			"kv.password":             "",
-			"kv.db":                   0,
-			"kv.prefix":               "arcgo:",
-			"kv.default_ttl":          "30s",
+			"http.addr":                ":8080",
+			"db.driver":                "sqlite",
+			"db.dsn":                   "file:rbac.db?_pragma=busy_timeout(5000)",
+			"jwt.issuer":               "arcgo-rbac-template",
+			"jwt.audience":             "arcgo",
+			"access.token.ttl":         "30m",
+			"refresh.token.ttl":        "168h",
+			"allow.insecure.dev":       true,
+			"auth.sources":             "root,db",
+			"auth.root.username":       "root",
+			"auth.root.password":       "root",
+			"auth.login.rate.limit":    20,
+			"auth.login.rate.window":   "1m",
+			"auth.refresh.rate.limit":  60,
+			"auth.refresh.rate.window": "1m",
+			"bootstrap.admin.user.id":  "admin",
+			"kv.enabled":               false,
+			"kv.driver":                "valkey",
+			"kv.addr":                  "127.0.0.1:6379",
+			"kv.password":              "",
+			"kv.db":                    0,
+			"kv.prefix":                "arcgo:",
+			"kv.default_ttl":           "30s",
 		}),
 	)
 	if err != nil {
@@ -196,15 +219,19 @@ func buildConfigFromRaw(raw legacyRaw) Config {
 			DSN:    strings.TrimSpace(raw.DB.DSN),
 		},
 		Auth: AuthConfig{
-			JWTSecret:        strings.TrimSpace(raw.JWT.Secret),
-			AccessTokenTTL:   raw.Access.Token.TTL,
-			Issuer:           strings.TrimSpace(raw.JWT.Issuer),
-			Audience:         strings.TrimSpace(raw.JWT.Audience),
-			AllowInsecureDev: raw.Allow.Insecure.Dev,
-			Sources:          strings.TrimSpace(raw.Auth.Sources),
-			RootUsername:     strings.TrimSpace(raw.Auth.Root.Username),
-			RootPassword:     raw.Auth.Root.Password,
-			RefreshTokenTTL:  raw.Refresh.Token.TTL,
+			JWTSecret:         strings.TrimSpace(raw.JWT.Secret),
+			AccessTokenTTL:    raw.Access.Token.TTL,
+			Issuer:            strings.TrimSpace(raw.JWT.Issuer),
+			Audience:          strings.TrimSpace(raw.JWT.Audience),
+			AllowInsecureDev:  raw.Allow.Insecure.Dev,
+			Sources:           strings.TrimSpace(raw.Auth.Sources),
+			RootUsername:      strings.TrimSpace(raw.Auth.Root.Username),
+			RootPassword:      raw.Auth.Root.Password,
+			RefreshTokenTTL:   raw.Refresh.Token.TTL,
+			LoginRateLimit:    raw.Auth.Login.Rate.Limit,
+			LoginRateWindow:   raw.Auth.Login.Rate.Window,
+			RefreshRateLimit:  raw.Auth.Refresh.Rate.Limit,
+			RefreshRateWindow: raw.Auth.Refresh.Rate.Window,
 		},
 		KV: KVConfig{
 			Enabled:    raw.KV.Enabled,

@@ -16,6 +16,17 @@ type TokenResponse struct {
 	AccessToken string `json:"accessToken"`
 }
 
+type AuthAuditLogDTO struct {
+	Event            string `json:"event"`
+	UserID           string `json:"userId"`
+	Username         string `json:"username"`
+	ClientIP         string `json:"clientIp"`
+	Success          bool   `json:"success"`
+	Reason           string `json:"reason"`
+	CreatedAt        int64  `json:"createdAt"`
+	CreatedAtRFC3339 string `json:"createdAtRFC3339"`
+}
+
 type RoleRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`

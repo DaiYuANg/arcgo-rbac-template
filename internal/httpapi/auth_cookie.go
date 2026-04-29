@@ -23,6 +23,21 @@ func buildRefreshCookie(token string, secure bool, maxAgeSeconds int) string {
 	return strings.Join(parts, "; ")
 }
 
+func buildExpiredRefreshCookie(secure bool) string {
+	parts := []string{
+		"refreshToken=",
+		"Path=/",
+		"HttpOnly",
+		"SameSite=Lax",
+		"Max-Age=0",
+		"Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+	}
+	if secure {
+		parts = append(parts, "Secure")
+	}
+	return strings.Join(parts, "; ")
+}
+
 func cookieValue(rawCookie, key string) string {
 	rawCookie = strings.TrimSpace(rawCookie)
 	if rawCookie == "" || strings.TrimSpace(key) == "" {

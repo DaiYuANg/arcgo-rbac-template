@@ -44,6 +44,10 @@ go run ./cmd/migrate
 - `AUTH_SOURCES`: 登录认证来源（逗号分隔），默认 `root,db`
 - `AUTH_ROOT_USERNAME`: root 登录用户名，默认 `root`
 - `AUTH_ROOT_PASSWORD`: root 登录密码，默认 `root`
+- `AUTH_LOGIN_RATE_LIMIT`: 登录接口限流次数，默认 `20`
+- `AUTH_LOGIN_RATE_WINDOW`: 登录接口限流窗口，默认 `1m`
+- `AUTH_REFRESH_RATE_LIMIT`: 刷新接口限流次数，默认 `60`
+- `AUTH_REFRESH_RATE_WINDOW`: 刷新接口限流窗口，默认 `1m`
 - `KV_ENABLED`: 是否启用分布式缓存（Valkey/Redis），默认 `false`
 - `KV_DRIVER`: `valkey`（默认）或 `redis`
 - `KV_ADDR`: 默认 `127.0.0.1:6379`
@@ -114,6 +118,20 @@ curl -i -X POST http://localhost:8080/api/auth/refresh ^
   -H "Cookie: refreshToken=<REFRESH_TOKEN_FROM_COOKIE>"
 ```
 
+登出并撤销当前 refresh token：
+
+```bash
+curl -i -X POST http://localhost:8080/api/auth/logout ^
+  -H "Cookie: refreshToken=<REFRESH_TOKEN_FROM_COOKIE>"
+```
+
+登出当前用户的全部会话（需要 access token）：
+
+```bash
+curl -i -X POST http://localhost:8080/api/auth/logout-all ^
+  -H "Authorization: Bearer <TOKEN>"
+```
+
 ### 2) 访问需要登录的接口
 
 ```bash
@@ -156,6 +174,22 @@ curl -s -X POST http://localhost:8080/api/auth/login ^
 - `internal/httpapi`: httpx typed routes
 - `internal/iam`: IAM（DDD：domain/application/infra(dbxrepo)）
 - `internal/authz`: authx Authorizer（基于 IAM application）
+
+## 审计日志
+
+认证相关行为会在日志中输出 `auth_audit`，同时会写入 `auth_audit_logs` 表（由迁移创建）：
+
+- `event`：行为类型（如 `login` / `refresh` / `logout` / `logout-all`）
+- `user_id` / `username` / `client_ip`
+- `success` / `reason`
+- `created_at`（毫秒时间戳）
+
+可通过接口查询审计日志（需要已登录且具备 `users:read`）：
+
+```bash
+curl -s "http://localhost:8080/api/auth/audit-logs?page=1&pageSize=20" ^
+  -H "Authorization: Bearer <TOKEN>"
+```
 
 ## 下一步怎么接入 arcgolabs 的库
 

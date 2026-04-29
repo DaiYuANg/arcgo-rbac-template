@@ -13,13 +13,13 @@ import (
 	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/testutil"
+	"github.com/arcgolabs/httpx"
 	adapter "github.com/arcgolabs/httpx/adapter"
 	adapterfiber "github.com/arcgolabs/httpx/adapter/fiber"
-	"github.com/arcgolabs/httpx"
 	"github.com/gofiber/fiber/v2"
 )
 
-func setupRBACApp(t *testing.T, seedAlice, seedDenied bool) (*fiber.App, func()) {
+func setupRBACApp(t *testing.T, seedAlice, seedDenied bool, mutateCfg func(*config.Config)) (*fiber.App, func()) {
 	t.Helper()
 	core, dia, cleanupDB := testutil.MustMigratingDB(t)
 	if seedAlice {
@@ -30,6 +30,9 @@ func setupRBACApp(t *testing.T, seedAlice, seedDenied bool) (*fiber.App, func())
 	}
 
 	cfg := config.Config{Auth: testutil.DefaultIntegrationAuth()}
+	if mutateCfg != nil {
+		mutateCfg(&cfg)
+	}
 	userRepo := dbxrepo.NewUserRepo(core, dia)
 	roleRepo := dbxrepo.NewRoleRepo(core, dia)
 	groupRepo := dbxrepo.NewPermissionGroupRepo(core, dia)
@@ -39,7 +42,15 @@ func setupRBACApp(t *testing.T, seedAlice, seedDenied bool) (*fiber.App, func())
 	meSvc := iamservice.NewMeService(userRepo, roleRepo, groupRepo, permRepo)
 	usersSvc := iamservice.NewUsersService(userRepo)
 
-	authEp := &AuthEndpoint{cfg: cfg, engine: eng, cache: nil, cachePrefix: ""}
+	authLogger := slog.New(slog.DiscardHandler)
+	authEp := &AuthEndpoint{
+		cfg:       cfg,
+		engine:    eng,
+		cache:     nil,
+		core:      core,
+		logger:    authLogger,
+		auditSink: newAuthAuditSink(core, authLogger),
+	}
 	meEp := &MeEndpoint{engine: eng, svc: meSvc, cache: nil, cachePrefix: "", cacheTTL: time.Minute}
 	usersEp := &UsersResource{engine: eng, svc: usersSvc, cacheTTL: time.Minute}
 
@@ -70,7 +81,7 @@ func setupRBACApp(t *testing.T, seedAlice, seedDenied bool) (*fiber.App, func())
 
 func TestIntegration_LoginMeAndListUsers(t *testing.T) {
 	t.Parallel()
-	app, cleanup := setupRBACApp(t, true, false)
+	app, cleanup := setupRBACApp(t, true, false, nil)
 	defer cleanup()
 
 	loginBody := map[string]string{
@@ -112,7 +123,7 @@ func TestIntegration_LoginMeAndListUsers(t *testing.T) {
 
 func TestIntegration_DeniedWithoutUsersRead(t *testing.T) {
 	t.Parallel()
-	app, cleanup := setupRBACApp(t, false, true)
+	app, cleanup := setupRBACApp(t, false, true, nil)
 	defer cleanup()
 
 	loginBody := map[string]string{
@@ -138,7 +149,7 @@ func TestIntegration_DeniedWithoutUsersRead(t *testing.T) {
 
 func TestIntegration_RefreshRotatesSession(t *testing.T) {
 	t.Parallel()
-	app, cleanup := setupRBACApp(t, true, false)
+	app, cleanup := setupRBACApp(t, true, false, nil)
 	defer cleanup()
 
 	loginBody := map[string]string{
@@ -169,6 +180,64 @@ func TestIntegration_RefreshRotatesSession(t *testing.T) {
 	}
 	if outTok.AccessToken == "" {
 		t.Fatalf("missing new access token")
+	}
+}
+
+func TestIntegration_LogoutRevokesRefreshToken(t *testing.T) {
+	t.Parallel()
+	app, cleanup := setupRBACApp(t, true, false, nil)
+	defer cleanup()
+
+	loginBody := map[string]string{
+		"username": testutil.TestUserAlice,
+		"password": "integration-secret",
+	}
+	resLogin := testutil.FiberDoJSONDetailed(t, app, "POST", "/api/auth/login", loginBody, nil)
+	if resLogin.StatusCode != http.StatusOK {
+		t.Fatalf("login status %d body %s", resLogin.StatusCode, string(resLogin.Body))
+	}
+	refresh := extractCookie(resLogin.Header.Get("Set-Cookie"), "refreshToken")
+	if refresh == "" {
+		t.Fatalf("missing refresh cookie from %v", resLogin.Header.Values("Set-Cookie"))
+	}
+
+	logoutRes := testutil.FiberRequest(t, app, "POST", "/api/auth/logout",
+		strings.NewReader("{}"), map[string]string{
+			"Cookie": "refreshToken=" + refresh,
+		})
+	if logoutRes.StatusCode != http.StatusOK {
+		t.Fatalf("logout %d: %s", logoutRes.StatusCode, logoutRes.Body)
+	}
+
+	refreshRes := testutil.FiberRequest(t, app, "POST", "/api/auth/refresh",
+		strings.NewReader("{}"), map[string]string{
+			"Cookie": "refreshToken=" + refresh,
+		})
+	if refreshRes.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after logout, got %d: %s", refreshRes.StatusCode, refreshRes.Body)
+	}
+}
+
+func TestIntegration_LoginRateLimit(t *testing.T) {
+	t.Parallel()
+	app, cleanup := setupRBACApp(t, true, false, func(cfg *config.Config) {
+		cfg.Auth.LoginRateLimit = 1
+		cfg.Auth.LoginRateWindow = time.Hour
+	})
+	defer cleanup()
+
+	badLogin := map[string]string{
+		"username": testutil.TestUserAlice,
+		"password": "wrong-password",
+	}
+	first := testutil.FiberDoJSONDetailed(t, app, "POST", "/api/auth/login", badLogin, nil)
+	if first.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("first login status %d body %s", first.StatusCode, string(first.Body))
+	}
+
+	second := testutil.FiberDoJSONDetailed(t, app, "POST", "/api/auth/login", badLogin, nil)
+	if second.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 on second login, got %d body %s", second.StatusCode, string(second.Body))
 	}
 }
 
