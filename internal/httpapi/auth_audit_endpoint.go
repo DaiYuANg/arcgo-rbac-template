@@ -2,12 +2,16 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/arcgolabs/authx"
 	authjwt "github.com/arcgolabs/authx/jwt"
+	collectionlist "github.com/arcgolabs/collectionx/list"
+	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/sqlexec"
+	"github.com/arcgolabs/dbx/sqlstmt"
 	"github.com/arcgolabs/httpx"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -80,42 +84,22 @@ func normalizeAuditListInput(in *auditLogsListInput) normalizedAuditListInput {
 }
 
 func (e *AuthEndpoint) listAuditLogs(ctx context.Context, in normalizedAuditListInput) (*PageResponse[AuthAuditLogDTO], error) {
-	whereSQL, args := e.buildAuditWhere(in)
-	countSQL := "SELECT COUNT(1) FROM auth_audit_logs" + whereSQL
-	var total int64
-	if err := e.core.SQLDB().QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+	countStmt := e.newAuditCountStatement()
+	total, err := sqlexec.ScalarTyped[normalizedAuditListInput, int64](ctx, e.core, countStmt, in)
+	if err != nil {
 		return nil, httpx.NewError(500, "unknown", fmt.Errorf("count auth audits: %w", err))
 	}
 
-	limitBind := e.core.Dialect().BindVar(len(args) + 1)
-	offsetBind := e.core.Dialect().BindVar(len(args) + 2)
-	listSQL := `SELECT event, user_id, username, client_ip, success, reason, created_at
-		FROM auth_audit_logs` + whereSQL + ` ORDER BY created_at DESC LIMIT ` + limitBind + ` OFFSET ` + offsetBind
-
-	listArgs := cloneAny(args)
-	listArgs = append(listArgs, in.PageSize, (in.Page-1)*in.PageSize)
-	rows, err := e.core.SQLDB().QueryContext(ctx, listSQL, listArgs...)
+	listStmt := e.newAuditListStatement()
+	rows, err := sqlexec.ListTyped[normalizedAuditListInput, authAuditLogRow](ctx, e.core, listStmt, in, mapper.MustStructMapper[authAuditLogRow]())
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", fmt.Errorf("query auth audits: %w", err))
 	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			slog.Default().Warn("auth_audit_rows_close_failed", "error", closeErr)
-		}
-	}()
-
 	items := make([]AuthAuditLogDTO, 0, in.PageSize)
-	for rows.Next() {
-		var row AuthAuditLogDTO
-		if scanErr := rows.Scan(&row.Event, &row.UserID, &row.Username, &row.ClientIP, &row.Success, &row.Reason, &row.CreatedAt); scanErr != nil {
-			return nil, httpx.NewError(500, "unknown", fmt.Errorf("scan auth audits: %w", scanErr))
-		}
-		row.CreatedAtRFC3339 = unixMilliToRFC3339(row.CreatedAt)
-		items = append(items, row)
-	}
-	if rowsErr := rows.Err(); rowsErr != nil {
-		return nil, httpx.NewError(500, "unknown", fmt.Errorf("iterate auth audits: %w", rowsErr))
-	}
+	rows.Range(func(_ int, row authAuditLogRow) bool {
+		items = append(items, row.toDTO())
+		return true
+	})
 
 	return &PageResponse[AuthAuditLogDTO]{
 		Body: PagePayload[AuthAuditLogDTO]{
@@ -157,6 +141,49 @@ func (e *AuthEndpoint) buildAuditWhere(in normalizedAuditListInput) (string, []a
 		return "", args
 	}
 	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func (e *AuthEndpoint) newAuditCountStatement() sqlstmt.TypedSource[normalizedAuditListInput] {
+	return sqlstmt.For[normalizedAuditListInput](sqlstmt.New("auth_audit_count", func(params any) (sqlstmt.Bound, error) {
+		in, err := assertAuditParams(params)
+		if err != nil {
+			return sqlstmt.Bound{}, err
+		}
+		whereSQL, args := e.buildAuditWhere(in)
+		return sqlstmt.Bound{
+			Name: "auth_audit_count",
+			SQL:  "SELECT COUNT(1) FROM auth_audit_logs" + whereSQL,
+			Args: collectionlist.NewList(args...),
+		}, nil
+	}))
+}
+
+func (e *AuthEndpoint) newAuditListStatement() sqlstmt.TypedSource[normalizedAuditListInput] {
+	return sqlstmt.For[normalizedAuditListInput](sqlstmt.New("auth_audit_list", func(params any) (sqlstmt.Bound, error) {
+		in, err := assertAuditParams(params)
+		if err != nil {
+			return sqlstmt.Bound{}, err
+		}
+		whereSQL, args := e.buildAuditWhere(in)
+		limitBind := e.core.Dialect().BindVar(len(args) + 1)
+		offsetBind := e.core.Dialect().BindVar(len(args) + 2)
+		sql := `SELECT event, user_id, username, client_ip, success, reason, created_at
+		FROM auth_audit_logs` + whereSQL + ` ORDER BY created_at DESC LIMIT ` + limitBind + ` OFFSET ` + offsetBind
+		bindArgs := append(cloneAny(args), in.PageSize, (in.Page-1)*in.PageSize)
+		return sqlstmt.Bound{
+			Name: "auth_audit_list",
+			SQL:  sql,
+			Args: collectionlist.NewList(bindArgs...),
+		}, nil
+	}))
+}
+
+func assertAuditParams(params any) (normalizedAuditListInput, error) {
+	in, ok := params.(normalizedAuditListInput)
+	if !ok {
+		return normalizedAuditListInput{}, errors.New("invalid audit query params")
+	}
+	return in, nil
 }
 
 func cloneAny(xs []any) []any {
@@ -204,4 +231,27 @@ func (e *AuthEndpoint) parseRefreshClaims(rawRefresh string) (authjwt.Claims, er
 		return authjwt.Claims{}, fmt.Errorf("parse refresh token: %w", err)
 	}
 	return claims, nil
+}
+
+type authAuditLogRow struct {
+	Event     string `dbx:"event"`
+	UserID    string `dbx:"user_id"`
+	Username  string `dbx:"username"`
+	ClientIP  string `dbx:"client_ip"`
+	Success   bool   `dbx:"success"`
+	Reason    string `dbx:"reason"`
+	CreatedAt int64  `dbx:"created_at"`
+}
+
+func (r authAuditLogRow) toDTO() AuthAuditLogDTO {
+	return AuthAuditLogDTO{
+		Event:            r.Event,
+		UserID:           r.UserID,
+		Username:         r.Username,
+		ClientIP:         r.ClientIP,
+		Success:          r.Success,
+		Reason:           r.Reason,
+		CreatedAt:        r.CreatedAt,
+		CreatedAtRFC3339: unixMilliToRFC3339(r.CreatedAt),
+	}
 }

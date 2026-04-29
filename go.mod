@@ -10,12 +10,12 @@ require (
 	github.com/arcgolabs/authx/jwt v0.1.0
 	github.com/arcgolabs/collectionx v0.2.0
 	github.com/arcgolabs/configx v0.3.0
-	github.com/arcgolabs/dbx v0.1.1
+	github.com/arcgolabs/dbx v0.1.2
 	github.com/arcgolabs/dbx/migrate v0.1.0
-	github.com/arcgolabs/dix v0.6.0
+	github.com/arcgolabs/dix v0.7.0
 	github.com/arcgolabs/httpx v0.1.1
 	github.com/arcgolabs/httpx/adapter/fiber v0.1.1
-	github.com/arcgolabs/logx v0.1.0
+	github.com/arcgolabs/logx v0.1.1
 	github.com/danielgtaylor/huma/v2 v2.37.3
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gofiber/fiber/v2 v2.52.13
@@ -32,15 +32,14 @@ require (
 	github.com/DmitriyVTitov/size v1.5.0 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/andybalholm/brotli v1.2.1 // indirect
-	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
-	github.com/arcgolabs/collectionx/internal v0.2.0 // indirect
-	github.com/arcgolabs/collectionx/interval v0.3.0 // indirect
-	github.com/arcgolabs/collectionx/list v0.2.0 // indirect
-	github.com/arcgolabs/collectionx/mapping v0.2.0 // indirect
-	github.com/arcgolabs/collectionx/prefix v0.3.0 // indirect
-	github.com/arcgolabs/collectionx/set v0.2.0 // indirect
-	github.com/arcgolabs/collectionx/tree v0.3.0 // indirect
+	github.com/arcgolabs/collectionx/internal v0.5.0 // indirect
+	github.com/arcgolabs/collectionx/interval v0.2.0 // indirect
+	github.com/arcgolabs/collectionx/list v0.5.0 // indirect
+	github.com/arcgolabs/collectionx/mapping v0.5.0 // indirect
+	github.com/arcgolabs/collectionx/prefix v0.2.0 // indirect
+	github.com/arcgolabs/collectionx/set v0.5.0 // indirect
+	github.com/arcgolabs/collectionx/tree v0.2.0 // indirect
 	github.com/arcgolabs/httpx/adapter/echo v0.1.1 // indirect
 	github.com/arcgolabs/httpx/adapter/gin v0.1.1 // indirect
 	github.com/arcgolabs/httpx/adapter/std v0.1.1 // indirect
@@ -50,7 +49,6 @@ require (
 	github.com/bmatcuk/doublestar v1.3.4 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
