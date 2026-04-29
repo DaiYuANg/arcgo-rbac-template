@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/authz"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
@@ -89,6 +90,7 @@ func rbacModule(rootCtx context.Context) dix.Module {
 		),
 		dix.Hooks(
 			dix.OnStart3(func(ctx context.Context, cfg config.Config, server httpx.ServerRuntime, _ *fiber.App) error {
+				logRouteSummary(server, slog.Default())
 				go runHTTPServer(ctx, cfg, server)
 				return nil
 			}),
@@ -134,4 +136,41 @@ func shutdownServerAndDB(server httpx.ServerRuntime, dbh *DBHandle) error {
 		}
 	}
 	return nil
+}
+
+func logRouteSummary(server httpx.ServerRuntime, logger *slog.Logger) {
+	if server == nil {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	total := server.RouteCount()
+	authRoutes := server.GetRoutesByPath("/api/auth")
+	methodGroups := server.GetRoutesGroupedByMethod()
+
+	methodCounts := map[string]int{}
+	if methodGroups != nil {
+		methodGroups.Range(func(method string, routes []httpx.RouteInfo) bool {
+			methodCounts[method] = len(routes)
+			return true
+		})
+	}
+
+	methods := make([]string, 0, len(methodCounts))
+	for method := range methodCounts {
+		methods = append(methods, method)
+	}
+	sort.Strings(methods)
+	orderedCounts := make([]string, 0, len(methods))
+	for _, method := range methods {
+		orderedCounts = append(orderedCounts, fmt.Sprintf("%s:%d", method, methodCounts[method]))
+	}
+
+	logger.Info("http routes ready",
+		"total", total,
+		"auth_routes", authRoutes.Len(),
+		"methods", orderedCounts,
+	)
 }

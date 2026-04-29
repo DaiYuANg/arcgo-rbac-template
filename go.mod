@@ -9,12 +9,13 @@ require (
 	github.com/arcgolabs/authx v0.1.0
 	github.com/arcgolabs/authx/jwt v0.1.0
 	github.com/arcgolabs/collectionx v0.2.0
-	github.com/arcgolabs/configx v0.3.0
+	github.com/arcgolabs/collectionx/list v0.5.0
+	github.com/arcgolabs/configx v0.3.1
 	github.com/arcgolabs/dbx v0.1.2
 	github.com/arcgolabs/dbx/migrate v0.1.0
 	github.com/arcgolabs/dix v0.7.0
 	github.com/arcgolabs/httpx v0.1.1
-	github.com/arcgolabs/httpx/adapter/fiber v0.1.1
+	github.com/arcgolabs/httpx/adapter/fiber v0.1.2
 	github.com/arcgolabs/logx v0.1.1
 	github.com/danielgtaylor/huma/v2 v2.37.3
 	github.com/go-sql-driver/mysql v1.9.3
@@ -35,7 +36,6 @@ require (
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/arcgolabs/collectionx/internal v0.5.0 // indirect
 	github.com/arcgolabs/collectionx/interval v0.2.0 // indirect
-	github.com/arcgolabs/collectionx/list v0.5.0 // indirect
 	github.com/arcgolabs/collectionx/mapping v0.5.0 // indirect
 	github.com/arcgolabs/collectionx/prefix v0.2.0 // indirect
 	github.com/arcgolabs/collectionx/set v0.5.0 // indirect
@@ -43,7 +43,7 @@ require (
 	github.com/arcgolabs/httpx/adapter/echo v0.1.1 // indirect
 	github.com/arcgolabs/httpx/adapter/gin v0.1.1 // indirect
 	github.com/arcgolabs/httpx/adapter/std v0.1.1 // indirect
-	github.com/arcgolabs/observabilityx v0.2.0 // indirect
+	github.com/arcgolabs/observabilityx v0.3.0 // indirect
 	github.com/arcgolabs/pkg/option v0.0.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bmatcuk/doublestar v1.3.4 // indirect
