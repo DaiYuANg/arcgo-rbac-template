@@ -6,15 +6,15 @@ require (
 	github.com/DaiYuANg/arcgo/kvx v0.2.5
 	github.com/DaiYuANg/arcgo/kvx/adapter/redis v0.2.5
 	github.com/DaiYuANg/arcgo/kvx/adapter/valkey v0.2.5
-	github.com/arcgolabs/authx v0.1.0
-	github.com/arcgolabs/authx/jwt v0.1.0
-	github.com/arcgolabs/collectionx v0.2.0
-	github.com/arcgolabs/collectionx/list v0.5.0
+	github.com/arcgolabs/authx v0.2.0
+	github.com/arcgolabs/authx/jwt v0.2.0
+	github.com/arcgolabs/collectionx/list v0.6.0
 	github.com/arcgolabs/configx v0.3.1
-	github.com/arcgolabs/dbx v0.1.2
-	github.com/arcgolabs/dbx/migrate v0.1.0
-	github.com/arcgolabs/dix v0.7.0
-	github.com/arcgolabs/httpx v0.1.1
+	github.com/arcgolabs/dbx v0.1.3
+	github.com/arcgolabs/dbx/migrate v0.1.1
+	github.com/arcgolabs/dbx/sqltmpl v0.1.1
+	github.com/arcgolabs/dix v0.7.1
+	github.com/arcgolabs/httpx v0.1.2
 	github.com/arcgolabs/httpx/adapter/fiber v0.1.2
 	github.com/arcgolabs/logx v0.1.1
 	github.com/danielgtaylor/huma/v2 v2.37.3
@@ -34,12 +34,10 @@ require (
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
-	github.com/arcgolabs/collectionx/internal v0.5.0 // indirect
-	github.com/arcgolabs/collectionx/interval v0.2.0 // indirect
-	github.com/arcgolabs/collectionx/mapping v0.5.0 // indirect
-	github.com/arcgolabs/collectionx/prefix v0.2.0 // indirect
-	github.com/arcgolabs/collectionx/set v0.5.0 // indirect
-	github.com/arcgolabs/collectionx/tree v0.2.0 // indirect
+	github.com/arcgolabs/collectionx/internal v0.6.0 // indirect
+	github.com/arcgolabs/collectionx/mapping v0.6.0 // indirect
+	github.com/arcgolabs/collectionx/set v0.6.0 // indirect
+	github.com/arcgolabs/dbx/sqltmpl/validate v0.1.1 // indirect
 	github.com/arcgolabs/httpx/adapter/echo v0.1.1 // indirect
 	github.com/arcgolabs/httpx/adapter/gin v0.1.1 // indirect
 	github.com/arcgolabs/httpx/adapter/std v0.1.1 // indirect
@@ -50,6 +48,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/go-chi/chi/v5 v5.2.5 // indirect

@@ -1,7 +1,7 @@
 package httpapi
 
 import (
-	"github.com/arcgolabs/collectionx"
+	collectionlist "github.com/arcgolabs/collectionx/list"
 	"github.com/arcgolabs/httpx"
 	"github.com/gofiber/fiber/v2"
 )
@@ -24,7 +24,7 @@ func RegisterFiberBindings(app *fiber.App, binders ...FiberBinder) {
 	}
 }
 
-func wireFiberBinders(app *fiber.App, binders collectionx.List[FiberBinder]) {
+func wireFiberBinders(app *fiber.App, binders *collectionlist.List[FiberBinder]) {
 	if binders == nil {
 		return
 	}
@@ -34,7 +34,7 @@ func wireFiberBinders(app *fiber.App, binders collectionx.List[FiberBinder]) {
 	})
 }
 
-func wireHTTPEndpoints(server httpx.ServerRuntime, endpoints collectionx.List[httpx.Endpoint]) {
+func wireHTTPEndpoints(server httpx.ServerRuntime, endpoints *collectionlist.List[httpx.Endpoint]) {
 	if endpoints == nil {
 		return
 	}

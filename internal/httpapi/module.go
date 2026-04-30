@@ -8,7 +8,7 @@ import (
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
 	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
 	"github.com/arcgolabs/authx"
-	"github.com/arcgolabs/collectionx"
+	collectionlist "github.com/arcgolabs/collectionx/list"
 	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/httpx"
@@ -67,11 +67,11 @@ func Module() dix.Module {
 			),
 		),
 		dix.Hooks(
-			dix.OnStart2(func(_ context.Context, app *fiber.App, binders collectionx.List[FiberBinder]) error {
+			dix.OnStart2(func(_ context.Context, app *fiber.App, binders *collectionlist.List[FiberBinder]) error {
 				wireFiberBinders(app, binders)
 				return nil
 			}),
-			dix.OnStart2(func(_ context.Context, server httpx.ServerRuntime, endpoints collectionx.List[httpx.Endpoint]) error {
+			dix.OnStart2(func(_ context.Context, server httpx.ServerRuntime, endpoints *collectionlist.List[httpx.Endpoint]) error {
 				wireHTTPEndpoints(server, endpoints)
 				return nil
 			}),
