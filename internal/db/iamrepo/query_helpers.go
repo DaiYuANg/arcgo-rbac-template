@@ -1,4 +1,4 @@
-package dbxrepo
+package iamrepo
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"github.com/arcgolabs/dbx/querydsl"
 )
 
-// predicatesAnd folds filters with AND; an empty slice returns nil (no WHERE clause).
 func predicatesAnd(predicates []querydsl.Predicate) querydsl.Predicate {
 	items := querydsl.CompactPredicates(predicates)
 	if items.Len() == 0 {

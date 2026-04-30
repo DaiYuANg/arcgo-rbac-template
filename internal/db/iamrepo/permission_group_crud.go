@@ -1,4 +1,5 @@
-package dbxrepo
+//nolint:dupl // CRUD flows across repos are intentionally parallel.
+package iamrepo
 
 import (
 	"context"
@@ -39,10 +40,7 @@ func permissionGroupListPredicates(q domain.PermissionGroupsListQuery) []queryds
 		preds = append(preds, querydsl.Like(PermissionGroups.Name, "%"+v+"%"))
 	}
 	if v := strings.TrimSpace(q.Q); v != "" {
-		preds = append(preds, querydsl.Or(
-			querydsl.Like(PermissionGroups.Name, "%"+v+"%"),
-			querydsl.Like(PermissionGroups.Description, "%"+v+"%"),
-		))
+		preds = append(preds, querydsl.Or(querydsl.Like(PermissionGroups.Name, "%"+v+"%"), querydsl.Like(PermissionGroups.Description, "%"+v+"%")))
 	}
 	return preds
 }
@@ -58,26 +56,16 @@ func (r *PermissionGroupRepo) Get(ctx context.Context, groupID domain.Permission
 		Description string `dbx:"description"`
 		CreatedAt   int64  `dbx:"created_at"`
 	}
-	q := querydsl.
-		Select(PermissionGroups.ID, PermissionGroups.Name, PermissionGroups.Description, PermissionGroups.CreatedAt).
-		From(PermissionGroups).
-		Where(PermissionGroups.ID.Eq(id)).
-		Limit(1)
+	q := querydsl.Select(PermissionGroups.ID, PermissionGroups.Name, PermissionGroups.Description, PermissionGroups.CreatedAt).From(PermissionGroups).Where(PermissionGroups.ID.Eq(id)).Limit(1)
 	first, err := queryOne[row](ctx, r.core, q, "permission group get")
 	if err != nil {
 		return domain.PermissionGroup{}, err
 	}
-	return domain.PermissionGroup{
-		ID:          domain.PermissionGroupID(first.ID),
-		Name:        first.Name,
-		Description: first.Description,
-		CreatedAt:   first.CreatedAt,
-	}, nil
+	return domain.PermissionGroup{ID: domain.PermissionGroupID(first.ID), Name: first.Name, Description: first.Description, CreatedAt: first.CreatedAt}, nil
 }
 
 func (r *PermissionGroupRepo) List(ctx context.Context, q domain.PermissionGroupsListQuery) (domain.Page[domain.PermissionGroup], error) {
 	where := predicatesAnd(permissionGroupListPredicates(q))
-
 	desc := q.Order == domain.SortDesc
 	ord, oerr := listOrderBy(q.Sort, desc, permissionGroupListOrders)
 	if oerr != nil {
@@ -87,11 +75,7 @@ func (r *PermissionGroupRepo) List(ctx context.Context, q domain.PermissionGroup
 	if where != nil {
 		specs = append(specs, repository.Where(where))
 	}
-	pageResult, err := r.repo.ListPageSpecRequest(
-		ctx,
-		paging.Request{Page: int(q.Page), PageSize: int(q.PageSize)},
-		specs...,
-	)
+	pageResult, err := r.repo.ListPageSpecRequest(ctx, paging.Request{Page: int(q.Page), PageSize: int(q.PageSize)}, specs...)
 	if err != nil {
 		return domain.Page[domain.PermissionGroup]{}, fmt.Errorf("permission group list: %w", err)
 	}
@@ -102,39 +86,19 @@ func (r *PermissionGroupRepo) List(ctx context.Context, q domain.PermissionGroup
 	out := make([]domain.PermissionGroup, 0, size)
 	if pageResult.Items != nil {
 		pageResult.Items.Range(func(_ int, ent PermissionGroup) bool {
-			out = append(out, domain.PermissionGroup{
-				ID:          domain.PermissionGroupID(ent.ID),
-				Name:        ent.Name,
-				Description: ent.Description,
-				CreatedAt:   ent.CreatedAt,
-			})
+			out = append(out, domain.PermissionGroup{ID: domain.PermissionGroupID(ent.ID), Name: ent.Name, Description: ent.Description, CreatedAt: ent.CreatedAt})
 			return true
 		})
 	}
-	return domain.Page[domain.PermissionGroup]{
-		Items:    out,
-		Total:    pageResult.Total,
-		Page:     int64(pageResult.Page),
-		PageSize: int64(pageResult.PageSize),
-	}, nil
+	return domain.Page[domain.PermissionGroup]{Items: out, Total: pageResult.Total, Page: int64(pageResult.Page), PageSize: int64(pageResult.PageSize)}, nil
 }
 
 func (r *PermissionGroupRepo) Create(ctx context.Context, g domain.PermissionGroup) (domain.PermissionGroup, error) {
-	ent := PermissionGroup{
-		ID:          strings.TrimSpace(string(g.ID)),
-		Name:        strings.TrimSpace(g.Name),
-		Description: strings.TrimSpace(g.Description),
-		CreatedAt:   g.CreatedAt,
-	}
+	ent := PermissionGroup{ID: strings.TrimSpace(string(g.ID)), Name: strings.TrimSpace(g.Name), Description: strings.TrimSpace(g.Description), CreatedAt: g.CreatedAt}
 	if err := repository.New[PermissionGroup](r.core, PermissionGroups).Create(ctx, &ent); err != nil {
 		return domain.PermissionGroup{}, fmt.Errorf("permission group create: %w", err)
 	}
-	return domain.PermissionGroup{
-		ID:          domain.PermissionGroupID(ent.ID),
-		Name:        ent.Name,
-		Description: ent.Description,
-		CreatedAt:   ent.CreatedAt,
-	}, nil
+	return domain.PermissionGroup{ID: domain.PermissionGroupID(ent.ID), Name: ent.Name, Description: ent.Description, CreatedAt: ent.CreatedAt}, nil
 }
 
 func (r *PermissionGroupRepo) Update(ctx context.Context, g domain.PermissionGroup) (domain.PermissionGroup, error) {
@@ -142,13 +106,7 @@ func (r *PermissionGroupRepo) Update(ctx context.Context, g domain.PermissionGro
 	if id == "" {
 		return domain.PermissionGroup{}, domain.ErrNotFound
 	}
-	upd := querydsl.
-		Update(PermissionGroups).
-		Set(
-			PermissionGroups.Name.Set(strings.TrimSpace(g.Name)),
-			PermissionGroups.Description.Set(strings.TrimSpace(g.Description)),
-		).
-		Where(PermissionGroups.ID.Eq(id))
+	upd := querydsl.Update(PermissionGroups).Set(PermissionGroups.Name.Set(strings.TrimSpace(g.Name)), PermissionGroups.Description.Set(strings.TrimSpace(g.Description))).Where(PermissionGroups.ID.Eq(id))
 	if _, err := dbx.Exec(ctx, r.core, upd); err != nil {
 		return domain.PermissionGroup{}, fmt.Errorf("permission group update: %w", err)
 	}

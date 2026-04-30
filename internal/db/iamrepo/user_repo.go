@@ -1,10 +1,9 @@
-package dbxrepo
+package iamrepo
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dbx/querydsl"
@@ -14,9 +13,9 @@ type UserRepo struct {
 	baseRepo[User, UserSchema]
 }
 
-func NewUserRepo(core *dbx.DB, dialect db.Dialect) *UserRepo {
+func NewUserRepo(core *dbx.DB) *UserRepo {
 	return &UserRepo{
-		baseRepo: newBaseRepo[User](core, dialect, Users),
+		baseRepo: newBaseRepo[User](core, Users),
 	}
 }
 

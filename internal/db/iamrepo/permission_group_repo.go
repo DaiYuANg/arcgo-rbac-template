@@ -1,10 +1,9 @@
-package dbxrepo
+package iamrepo
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dbx/querydsl"
@@ -14,22 +13,16 @@ type PermissionGroupRepo struct {
 	baseRepo[PermissionGroup, PermissionGroupSchema]
 }
 
-func NewPermissionGroupRepo(core *dbx.DB, dialect db.Dialect) *PermissionGroupRepo {
-	return &PermissionGroupRepo{
-		baseRepo: newBaseRepo[PermissionGroup](core, dialect, PermissionGroups),
-	}
+func NewPermissionGroupRepo(core *dbx.DB) *PermissionGroupRepo {
+	return &PermissionGroupRepo{baseRepo: newBaseRepo[PermissionGroup](core, PermissionGroups)}
 }
 
 func (r *PermissionGroupRepo) Ensure(ctx context.Context, groupID domain.PermissionGroupID) error {
-	return ensureStringID(ctx, r.repo, string(groupID), "permission group", func(id string) *PermissionGroup {
-		return &PermissionGroup{ID: id}
-	})
+	return ensureStringID(ctx, r.repo, string(groupID), "permission group", func(id string) *PermissionGroup { return &PermissionGroup{ID: id} })
 }
 
 func (r *PermissionGroupRepo) listPermissionIDs(ctx context.Context, groupID string) ([]domain.PermissionID, error) {
-	q := querydsl.Select(PermissionGroupPermissions.PermID.As("value")).
-		From(PermissionGroupPermissions).
-		Where(PermissionGroupPermissions.GroupID.Eq(groupID))
+	q := querydsl.Select(PermissionGroupPermissions.PermID.As("value")).From(PermissionGroupPermissions).Where(PermissionGroupPermissions.GroupID.Eq(groupID))
 	items, err := queryStringColumn(ctx, r.core, q)
 	if err != nil {
 		return nil, err
@@ -58,8 +51,7 @@ func (r *PermissionGroupRepo) AddPermission(ctx context.Context, groupID domain.
 }
 
 func (r *PermissionGroupRepo) insertPermission(groupID, permID string) querydsl.Builder {
-	return querydsl.
-		InsertInto(PermissionGroupPermissions).
+	return querydsl.InsertInto(PermissionGroupPermissions).
 		Values(PermissionGroupPermissions.GroupID.Set(groupID), PermissionGroupPermissions.PermID.Set(permID)).
 		OnConflict(PermissionGroupPermissions.GroupID, PermissionGroupPermissions.PermID).
 		DoNothing()

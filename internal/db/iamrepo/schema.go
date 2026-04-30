@@ -1,12 +1,10 @@
-package dbxrepo
+package iamrepo
 
 import (
 	columnx "github.com/arcgolabs/dbx/column"
 	"github.com/arcgolabs/dbx/idgen"
 	schemax "github.com/arcgolabs/dbx/schema"
 )
-
-// --- entities ---
 
 type User struct {
 	ID        string `dbx:"id"`
@@ -60,8 +58,6 @@ type PermissionGroupPermission struct {
 	GroupID string `dbx:"group_id"`
 	PermID  string `dbx:"perm_id"`
 }
-
-// --- schemas (schema-first) ---
 
 type UserSchema struct {
 	schemax.Schema[User]

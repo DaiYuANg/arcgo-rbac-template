@@ -11,11 +11,11 @@ import (
 	"github.com/arcgolabs/arcgo-rbac-template/internal/authn"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/db/iamrepo"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/httpapi"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/application"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/kv"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/logger"
-	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dix"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -32,11 +32,12 @@ func main() {
 		dix.WithModules(
 			logger.Module(),
 			config.Module(),
+			db.Module(),
+			iamrepo.Module(),
 			authn.Module(),
 			kv.Module(),
 			application.Module(),
 			httpapi.Module(),
-			rbacModule(rootCtx),
 		),
 	)
 
@@ -48,9 +49,4 @@ func main() {
 		slog.Default().Error("app run failed", "error", err)
 		return
 	}
-}
-
-type DBHandle struct {
-	Core    *dbx.DB
-	Dialect db.Dialect
 }

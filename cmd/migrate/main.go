@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/logger"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/migrations"
-	dbxmigrate "github.com/arcgolabs/dbx/migrate"
 	"github.com/arcgolabs/dix"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -27,47 +25,8 @@ func main() {
 		dix.WithModules(
 			logger.Module(),
 			config.Module(),
-			dix.NewModule("migrate",
-				dix.Hooks(
-					dix.OnStart2(func(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
-						if cfg.DB.Driver == "memory" {
-							logger.Error("migrate requires DB_DRIVER != memory")
-							return context.Canceled
-						}
-
-						core, dialect, err := db.Open(ctx, cfg.DB, logger)
-						if err != nil {
-							logger.Error("db open failed", "error", err)
-							return fmt.Errorf("db open: %w", err)
-						}
-						defer func() {
-							if closeErr := core.Close(); closeErr != nil {
-								logger.Error("db close failed", "error", closeErr)
-							}
-						}()
-
-						_ = dialect
-						runner := dbxmigrate.NewRunner(core.SQLDB(), core.Dialect(), dbxmigrate.RunnerOptions{
-							HistoryTable:    "schema_history",
-							AllowOutOfOrder: false,
-							ValidateHash:    true,
-						})
-						mfs, dir := migrations.Filesystem()
-						source := dbxmigrate.FileSource{
-							FS:  mfs,
-							Dir: dir,
-						}
-						report, err := runner.UpSQL(ctx, source)
-						if err != nil {
-							logger.Error("migration failed", "error", err)
-							return fmt.Errorf("migration up: %w", err)
-						}
-
-						logger.Info("migration completed", "applied", report.Applied.Len())
-						return nil
-					}),
-				),
-			),
+			db.Module(),
+			migrations.Module(),
 		),
 	)
 

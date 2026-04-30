@@ -1,4 +1,4 @@
-package dbxrepo
+package iamrepo
 
 import (
 	"context"
@@ -10,23 +10,6 @@ import (
 	"github.com/arcgolabs/dbx/mapper"
 	"github.com/arcgolabs/dbx/querydsl"
 )
-
-type countRow struct {
-	Total int64 `dbx:"total"`
-}
-
-func countTotal(ctx context.Context, core *dbx.DB, countQuery querydsl.Builder) (int64, error) {
-	countItems, err := dbx.QueryAll(ctx, core, countQuery, mapper.MustStructMapper[countRow]())
-	if err != nil {
-		return 0, fmt.Errorf("count query: %w", err)
-	}
-	total := int64(0)
-	if countItems != nil && countItems.Len() > 0 {
-		first, _ := countItems.Get(0)
-		total = first.Total
-	}
-	return total, nil
-}
 
 func listOrderBy(sortKey string, desc bool, orders map[string]func(bool) querydsl.Order) (querydsl.Order, error) {
 	var none querydsl.Order

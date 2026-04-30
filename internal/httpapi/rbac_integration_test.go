@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/db/iamrepo"
 	iamservice "github.com/arcgolabs/arcgo-rbac-template/internal/iam/application/service"
-	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/testutil"
 	"github.com/arcgolabs/httpx"
 	adapter "github.com/arcgolabs/httpx/adapter"
@@ -21,7 +21,7 @@ import (
 
 func setupRBACApp(t *testing.T, seedAlice, seedDenied bool, mutateCfg func(*config.Config)) (*fiber.App, func()) {
 	t.Helper()
-	core, dia, cleanupDB := testutil.MustMigratingDB(t)
+	core, _, cleanupDB := testutil.MustMigratingDB(t)
 	if seedAlice {
 		testutil.SeedReaderUserAlice(t, core.SQLDB(), "integration-secret")
 	}
@@ -33,10 +33,10 @@ func setupRBACApp(t *testing.T, seedAlice, seedDenied bool, mutateCfg func(*conf
 	if mutateCfg != nil {
 		mutateCfg(&cfg)
 	}
-	userRepo := dbxrepo.NewUserRepo(core, dia)
-	roleRepo := dbxrepo.NewRoleRepo(core, dia)
-	groupRepo := dbxrepo.NewPermissionGroupRepo(core, dia)
-	permRepo := dbxrepo.NewPermissionRepo(core)
+	userRepo := iamrepo.NewUserRepo(core)
+	roleRepo := iamrepo.NewRoleRepo(core)
+	groupRepo := iamrepo.NewPermissionGroupRepo(core)
+	permRepo := iamrepo.NewPermissionRepo(core)
 
 	eng := testutil.MustAuthEngine(t, cfg, core, userRepo, roleRepo)
 	meSvc := iamservice.NewMeService(userRepo, roleRepo, groupRepo, permRepo)

@@ -4,20 +4,20 @@ import (
 	"context"
 	"testing"
 
+	"github.com/arcgolabs/arcgo-rbac-template/internal/db/iamrepo"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/application"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
-	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
 	"github.com/arcgolabs/arcgo-rbac-template/internal/testutil"
 )
 
 func TestAuthorizer_AllowsWhenRoleGrantsPermission(t *testing.T) {
 	t.Parallel()
-	core, dia, cleanup := testutil.MustMigratingDB(t)
+	core, _, cleanup := testutil.MustMigratingDB(t)
 	defer cleanup()
 	testutil.SeedReaderUserAlice(t, core.SQLDB(), "pw")
 
-	ur := dbxrepo.NewUserRepo(core, dia)
-	rr := dbxrepo.NewRoleRepo(core, dia)
+	ur := iamrepo.NewUserRepo(core)
+	rr := iamrepo.NewRoleRepo(core)
 	a := application.NewAuthorizer(ur, rr)
 
 	dec, err := a.Can(
@@ -37,12 +37,12 @@ func TestAuthorizer_AllowsWhenRoleGrantsPermission(t *testing.T) {
 
 func TestAuthorizer_DeniesWithoutPermission(t *testing.T) {
 	t.Parallel()
-	core, dia, cleanup := testutil.MustMigratingDB(t)
+	core, _, cleanup := testutil.MustMigratingDB(t)
 	defer cleanup()
 	testutil.SeedReaderUserAlice(t, core.SQLDB(), "pw")
 
-	ur := dbxrepo.NewUserRepo(core, dia)
-	rr := dbxrepo.NewRoleRepo(core, dia)
+	ur := iamrepo.NewUserRepo(core)
+	rr := iamrepo.NewRoleRepo(core)
 	a := application.NewAuthorizer(ur, rr)
 
 	dec, err := a.Can(
@@ -62,11 +62,11 @@ func TestAuthorizer_DeniesWithoutPermission(t *testing.T) {
 
 func TestAuthorizer_DeniesUnknownUser(t *testing.T) {
 	t.Parallel()
-	core, dia, cleanup := testutil.MustMigratingDB(t)
+	core, _, cleanup := testutil.MustMigratingDB(t)
 	defer cleanup()
 
-	ur := dbxrepo.NewUserRepo(core, dia)
-	rr := dbxrepo.NewRoleRepo(core, dia)
+	ur := iamrepo.NewUserRepo(core)
+	rr := iamrepo.NewRoleRepo(core)
 	a := application.NewAuthorizer(ur, rr)
 
 	dec, err := a.Can(

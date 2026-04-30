@@ -1,4 +1,4 @@
-package dbxrepo
+package iamrepo
 
 import (
 	"context"
@@ -17,10 +17,7 @@ type PermissionRepo struct {
 }
 
 func NewPermissionRepo(core *dbx.DB) *PermissionRepo {
-	return &PermissionRepo{
-		core: core,
-		repo: repository.New[Permission](core, Permissions),
-	}
+	return &PermissionRepo{core: core, repo: repository.New[Permission](core, Permissions)}
 }
 
 func (r *PermissionRepo) Ensure(ctx context.Context, permID domain.PermissionID) error {

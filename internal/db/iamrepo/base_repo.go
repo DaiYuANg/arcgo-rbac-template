@@ -1,5 +1,5 @@
-// Package dbxrepo provides dbx-backed repository implementations for IAM.
-package dbxrepo
+// Package iamrepo provides db-backed IAM repository implementations.
+package iamrepo
 
 import (
 	"context"
@@ -7,22 +7,19 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arcgolabs/arcgo-rbac-template/internal/db"
 	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dbx/repository"
 )
 
 type baseRepo[E any, S repository.EntitySchema[E]] struct {
-	core    *dbx.DB
-	dialect db.Dialect
-	repo    *repository.Base[E, S]
+	core *dbx.DB
+	repo *repository.Base[E, S]
 }
 
-func newBaseRepo[E any, S repository.EntitySchema[E]](core *dbx.DB, dialect db.Dialect, schema S) baseRepo[E, S] {
+func newBaseRepo[E any, S repository.EntitySchema[E]](core *dbx.DB, schema S) baseRepo[E, S] {
 	return baseRepo[E, S]{
-		core:    core,
-		dialect: dialect,
-		repo:    repository.New[E](core, schema),
+		core: core,
+		repo: repository.New[E](core, schema),
 	}
 }
 
@@ -60,8 +57,8 @@ func inTx(ctx context.Context, core *dbx.DB, fn func(tx *dbx.Tx) error) (err err
 		}
 	}()
 
-	if err = fn(tx); err != nil {
-		return err
+	if fnErr := fn(tx); fnErr != nil {
+		return fnErr
 	}
 	if err = tx.CommitContext(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)

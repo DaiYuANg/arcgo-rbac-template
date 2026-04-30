@@ -12,9 +12,11 @@ import (
 	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dix"
 	"github.com/arcgolabs/httpx"
+	adapterfiber "github.com/arcgolabs/httpx/adapter/fiber"
 	"github.com/gofiber/fiber/v2"
 )
 
+//nolint:funlen // Module wiring is intentionally centralized.
 func Module() dix.Module {
 	return dix.NewModule("httpapi",
 		dix.Providers(
@@ -65,6 +67,20 @@ func Module() dix.Module {
 				dix.Into[httpx.Endpoint](dix.Key("permission_groups"), dix.Order(40)),
 				dix.Into[FiberBinder](dix.Key("permission_groups"), dix.Order(40)),
 			),
+			dix.Provider0(func() *fiber.App {
+				return fiber.New(fiber.Config{
+					DisableStartupMessage: true,
+				})
+			}),
+			dix.Provider1(newAdapter),
+			dix.Provider2(func(a *adapterfiber.Adapter, logger *slog.Logger) httpx.ServerRuntime {
+				return httpx.New(
+					httpx.WithAdapter(a),
+					httpx.WithLogger(logger),
+					httpx.WithAccessLog(true),
+					httpx.WithValidation(),
+				)
+			}),
 		),
 		dix.Hooks(
 			dix.OnStart2(func(_ context.Context, app *fiber.App, binders *collectionlist.List[FiberBinder]) error {
@@ -74,6 +90,14 @@ func Module() dix.Module {
 			dix.OnStart2(func(_ context.Context, server httpx.ServerRuntime, endpoints *collectionlist.List[httpx.Endpoint]) error {
 				wireHTTPEndpoints(server, endpoints)
 				return nil
+			}),
+			dix.OnStart3(func(ctx context.Context, cfg config.Config, server httpx.ServerRuntime, logger *slog.Logger) error {
+				logRouteSummary(server, logger)
+				go runHTTPServer(ctx, cfg, server)
+				return nil
+			}),
+			dix.OnStop(func(_ context.Context, server httpx.ServerRuntime) error {
+				return shutdownServer(server)
 			}),
 		),
 	)

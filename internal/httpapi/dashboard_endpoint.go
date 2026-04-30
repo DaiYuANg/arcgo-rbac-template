@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/infra/dbxrepo"
+	"github.com/arcgolabs/arcgo-rbac-template/internal/db/iamrepo"
 	collectionlist "github.com/arcgolabs/collectionx/list"
 	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dbx/mapper"
@@ -55,19 +55,19 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*JSONBody[D
 		return wrapJSON(out), nil
 	}
 
-	totalUsers, err := e.countTable(ctx, dbxrepo.Users)
+	totalUsers, err := e.countTable(ctx, iamrepo.Users)
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	totalRoles, err := e.countTable(ctx, dbxrepo.Roles)
+	totalRoles, err := e.countTable(ctx, iamrepo.Roles)
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	totalPerms, err := e.countTable(ctx, dbxrepo.Permissions)
+	totalPerms, err := e.countTable(ctx, iamrepo.Permissions)
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
-	totalGroups, err := e.countTable(ctx, dbxrepo.PermissionGroups)
+	totalGroups, err := e.countTable(ctx, iamrepo.PermissionGroups)
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", err)
 	}
@@ -182,32 +182,40 @@ func (e *DashboardEndpoint) countTable(ctx context.Context, source querydsl.Tabl
 }
 
 func (e *DashboardEndpoint) listRoleDistribution(ctx context.Context) (*collectionlist.List[dashboardRoleDistributionRow], error) {
-	userCount := querydsl.Count(dbxrepo.UserRoles.UserID)
+	userCount := querydsl.Count(iamrepo.UserRoles.UserID)
 	q := querydsl.
 		Select(
-			dbxrepo.Roles.Name.As("name"),
+			iamrepo.Roles.Name.As("name"),
 			userCount.As("value"),
 		).
-		From(dbxrepo.Roles).
-		LeftJoin(dbxrepo.UserRoles).On(dbxrepo.UserRoles.RoleID.EqColumn(dbxrepo.Roles.ID)).
-		GroupBy(dbxrepo.Roles.ID, dbxrepo.Roles.Name).
+		From(iamrepo.Roles).
+		LeftJoin(iamrepo.UserRoles).On(iamrepo.UserRoles.RoleID.EqColumn(iamrepo.Roles.ID)).
+		GroupBy(iamrepo.Roles.ID, iamrepo.Roles.Name).
 		OrderBy(userCount.Desc()).
 		Limit(6)
-	return dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardRoleDistributionRow]())
+	items, err := dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardRoleDistributionRow]())
+	if err != nil {
+		return nil, fmt.Errorf("dashboard role distribution query: %w", err)
+	}
+	return items, nil
 }
 
 func (e *DashboardEndpoint) listPermissionGroups(ctx context.Context) (*collectionlist.List[dashboardPermissionGroupRow], error) {
-	permCount := querydsl.Count(dbxrepo.PermissionGroupPermissions.PermID)
+	permCount := querydsl.Count(iamrepo.PermissionGroupPermissions.PermID)
 	q := querydsl.
 		Select(
-			dbxrepo.PermissionGroups.Name.As("name"),
+			iamrepo.PermissionGroups.Name.As("name"),
 			permCount.As("count"),
 		).
-		From(dbxrepo.PermissionGroups).
-		LeftJoin(dbxrepo.PermissionGroupPermissions).On(
-			dbxrepo.PermissionGroupPermissions.GroupID.EqColumn(dbxrepo.PermissionGroups.ID),
-		).
-		GroupBy(dbxrepo.PermissionGroups.ID, dbxrepo.PermissionGroups.Name).
-		OrderBy(permCount.Desc(), dbxrepo.PermissionGroups.Name.Asc())
-	return dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardPermissionGroupRow]())
+		From(iamrepo.PermissionGroups).
+		LeftJoin(iamrepo.PermissionGroupPermissions).On(
+		iamrepo.PermissionGroupPermissions.GroupID.EqColumn(iamrepo.PermissionGroups.ID),
+	).
+		GroupBy(iamrepo.PermissionGroups.ID, iamrepo.PermissionGroups.Name).
+		OrderBy(permCount.Desc(), iamrepo.PermissionGroups.Name.Asc())
+	items, err := dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardPermissionGroupRow]())
+	if err != nil {
+		return nil, fmt.Errorf("dashboard permission group query: %w", err)
+	}
+	return items, nil
 }

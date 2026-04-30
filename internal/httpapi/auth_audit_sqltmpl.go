@@ -52,17 +52,25 @@ func toAuditListQueryParams(in normalizedAuditListInput) auditListQueryParams {
 func authAuditCountStatement(core *dbx.DB) (sqlstmt.Source, error) {
 	registry, err := authAuditRegistry(core)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve auth audit registry: %w", err)
 	}
-	return registry.Statement("sql/auth_audit/count.sql")
+	stmt, err := registry.Statement("sql/auth_audit/count.sql")
+	if err != nil {
+		return nil, fmt.Errorf("resolve auth_audit count statement: %w", err)
+	}
+	return stmt, nil
 }
 
 func authAuditListStatement(core *dbx.DB) (sqlstmt.Source, error) {
 	registry, err := authAuditRegistry(core)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve auth audit registry: %w", err)
 	}
-	return registry.Statement("sql/auth_audit/list.sql")
+	stmt, err := registry.Statement("sql/auth_audit/list.sql")
+	if err != nil {
+		return nil, fmt.Errorf("resolve auth_audit list statement: %w", err)
+	}
+	return stmt, nil
 }
 
 func authAuditRegistry(core *dbx.DB) (*sqltmpl.Registry, error) {
@@ -71,12 +79,23 @@ func authAuditRegistry(core *dbx.DB) (*sqltmpl.Registry, error) {
 	}
 	dialectName := core.Dialect().Name()
 	if v, ok := authAuditRegistryCache.Load(dialectName); ok {
-		return v.(*sqltmpl.Registry), nil
+		registry, ok := v.(*sqltmpl.Registry)
+		if !ok {
+			return nil, fmt.Errorf("invalid registry cache entry for dialect %q", dialectName)
+		}
+		return registry, nil
 	}
 	registry := sqltmpl.NewRegistry(authAuditSQLFS, core.Dialect())
 	if _, err := registry.PreloadAll(); err != nil {
 		return nil, fmt.Errorf("preload auth audit sql templates: %w", err)
 	}
-	actual, _ := authAuditRegistryCache.LoadOrStore(dialectName, registry)
-	return actual.(*sqltmpl.Registry), nil
+	actual, loaded := authAuditRegistryCache.LoadOrStore(dialectName, registry)
+	if loaded {
+		existing, ok := actual.(*sqltmpl.Registry)
+		if !ok {
+			return nil, fmt.Errorf("invalid stored registry entry for dialect %q", dialectName)
+		}
+		return existing, nil
+	}
+	return registry, nil
 }

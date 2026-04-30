@@ -1,4 +1,5 @@
-package dbxrepo
+//nolint:dupl // CRUD flows across repos are intentionally parallel.
+package iamrepo
 
 import (
 	"context"
@@ -48,10 +49,7 @@ func usersListPredicates(q domain.UsersListQuery) []querydsl.Predicate {
 		preds = append(preds, querydsl.Like(Users.Email, "%"+v+"%"))
 	}
 	if v := strings.TrimSpace(q.Q); v != "" {
-		preds = append(preds, querydsl.Or(
-			querydsl.Like(Users.Name, "%"+v+"%"),
-			querydsl.Like(Users.Email, "%"+v+"%"),
-		))
+		preds = append(preds, querydsl.Or(querydsl.Like(Users.Name, "%"+v+"%"), querydsl.Like(Users.Email, "%"+v+"%")))
 	}
 	return preds
 }
@@ -67,26 +65,16 @@ func (r *UserRepo) Get(ctx context.Context, userID domain.UserID) (domain.User, 
 		Name      string `dbx:"name"`
 		CreatedAt int64  `dbx:"created_at"`
 	}
-	q := querydsl.
-		Select(Users.ID, Users.Email, Users.Name, Users.CreatedAt).
-		From(Users).
-		Where(Users.ID.Eq(id)).
-		Limit(1)
+	q := querydsl.Select(Users.ID, Users.Email, Users.Name, Users.CreatedAt).From(Users).Where(Users.ID.Eq(id)).Limit(1)
 	first, err := queryOne[row](ctx, r.core, q, "user get")
 	if err != nil {
 		return domain.User{}, err
 	}
-	return domain.User{
-		ID:        domain.UserID(first.ID),
-		Email:     first.Email,
-		Name:      first.Name,
-		CreatedAt: first.CreatedAt,
-	}, nil
+	return domain.User{ID: domain.UserID(first.ID), Email: first.Email, Name: first.Name, CreatedAt: first.CreatedAt}, nil
 }
 
 func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Page[domain.User], error) {
 	where := predicatesAnd(usersListPredicates(q))
-
 	desc := q.Order == domain.SortDesc
 	ord, oerr := listOrderBy(q.Sort, desc, userListOrders)
 	if oerr != nil {
@@ -96,11 +84,7 @@ func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Pa
 	if where != nil {
 		specs = append(specs, repository.Where(where))
 	}
-	pageResult, err := r.repo.ListPageSpecRequest(
-		ctx,
-		paging.Request{Page: int(q.Page), PageSize: int(q.PageSize)},
-		specs...,
-	)
+	pageResult, err := r.repo.ListPageSpecRequest(ctx, paging.Request{Page: int(q.Page), PageSize: int(q.PageSize)}, specs...)
 	if err != nil {
 		return domain.Page[domain.User]{}, fmt.Errorf("user list: %w", err)
 	}
@@ -111,30 +95,15 @@ func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Pa
 	out := make([]domain.User, 0, size)
 	if pageResult.Items != nil {
 		pageResult.Items.Range(func(_ int, ent User) bool {
-			out = append(out, domain.User{
-				ID:        domain.UserID(ent.ID),
-				Email:     ent.Email,
-				Name:      ent.Name,
-				CreatedAt: ent.CreatedAt,
-			})
+			out = append(out, domain.User{ID: domain.UserID(ent.ID), Email: ent.Email, Name: ent.Name, CreatedAt: ent.CreatedAt})
 			return true
 		})
 	}
-	return domain.Page[domain.User]{
-		Items:    out,
-		Total:    pageResult.Total,
-		Page:     int64(pageResult.Page),
-		PageSize: int64(pageResult.PageSize),
-	}, nil
+	return domain.Page[domain.User]{Items: out, Total: pageResult.Total, Page: int64(pageResult.Page), PageSize: int64(pageResult.PageSize)}, nil
 }
 
 func (r *UserRepo) Create(ctx context.Context, u domain.User) (domain.User, error) {
-	ent := User{
-		ID:        strings.TrimSpace(string(u.ID)),
-		Email:     strings.TrimSpace(u.Email),
-		Name:      strings.TrimSpace(u.Name),
-		CreatedAt: u.CreatedAt,
-	}
+	ent := User{ID: strings.TrimSpace(string(u.ID)), Email: strings.TrimSpace(u.Email), Name: strings.TrimSpace(u.Name), CreatedAt: u.CreatedAt}
 	if err := repository.New[User](r.core, Users).Create(ctx, &ent); err != nil {
 		return domain.User{}, fmt.Errorf("user create: %w", err)
 	}
@@ -146,13 +115,7 @@ func (r *UserRepo) Update(ctx context.Context, u domain.User) (domain.User, erro
 	if id == "" {
 		return domain.User{}, domain.ErrNotFound
 	}
-	upd := querydsl.
-		Update(Users).
-		Set(
-			Users.Email.Set(strings.TrimSpace(u.Email)),
-			Users.Name.Set(strings.TrimSpace(u.Name)),
-		).
-		Where(Users.ID.Eq(id))
+	upd := querydsl.Update(Users).Set(Users.Email.Set(strings.TrimSpace(u.Email)), Users.Name.Set(strings.TrimSpace(u.Name))).Where(Users.ID.Eq(id))
 	if _, err := dbx.Exec(ctx, r.core, upd); err != nil {
 		return domain.User{}, fmt.Errorf("user update: %w", err)
 	}
@@ -173,12 +136,10 @@ func (r *UserRepo) Delete(ctx context.Context, userID domain.UserID) error {
 	return nil
 }
 
+//nolint:gocognit // Explicit transaction steps keep role replacement readable.
 func (r *UserRepo) ReplaceRoles(ctx context.Context, userID domain.UserID, roleIDs []domain.RoleID) error {
 	id := strings.TrimSpace(string(userID))
-	if id == "" {
-		return nil
-	}
-	if roleIDs == nil {
+	if id == "" || roleIDs == nil {
 		return nil
 	}
 	if err := inTx(ctx, r.core, func(tx *dbx.Tx) error {
@@ -190,11 +151,7 @@ func (r *UserRepo) ReplaceRoles(ctx context.Context, userID domain.UserID, roleI
 			if v == "" {
 				continue
 			}
-			ins := querydsl.
-				InsertInto(UserRoles).
-				Values(UserRoles.UserID.Set(id), UserRoles.RoleID.Set(v)).
-				OnConflict(UserRoles.UserID, UserRoles.RoleID).
-				DoNothing()
+			ins := querydsl.InsertInto(UserRoles).Values(UserRoles.UserID.Set(id), UserRoles.RoleID.Set(v)).OnConflict(UserRoles.UserID, UserRoles.RoleID).DoNothing()
 			if _, err := dbx.Exec(ctx, tx, ins); err != nil {
 				return fmt.Errorf("user replace roles insert: %w", err)
 			}
