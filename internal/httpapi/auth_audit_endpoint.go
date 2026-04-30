@@ -2,16 +2,13 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/arcgolabs/authx"
 	authjwt "github.com/arcgolabs/authx/jwt"
-	collectionlist "github.com/arcgolabs/collectionx/list"
 	"github.com/arcgolabs/dbx/mapper"
 	"github.com/arcgolabs/dbx/sqlexec"
-	"github.com/arcgolabs/dbx/sqlstmt"
 	"github.com/arcgolabs/httpx"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -84,14 +81,22 @@ func normalizeAuditListInput(in *auditLogsListInput) normalizedAuditListInput {
 }
 
 func (e *AuthEndpoint) listAuditLogs(ctx context.Context, in normalizedAuditListInput) (*PageResponse[AuthAuditLogDTO], error) {
-	countStmt := e.newAuditCountStatement()
-	total, err := sqlexec.ScalarTyped[normalizedAuditListInput, int64](ctx, e.core, countStmt, in)
+	params := toAuditListQueryParams(in)
+
+	countStmt, err := authAuditCountStatement(e.core)
+	if err != nil {
+		return nil, httpx.NewError(500, "unknown", fmt.Errorf("prepare auth audit count statement: %w", err))
+	}
+	total, err := sqlexec.Scalar[int64](ctx, e.core, countStmt, params)
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", fmt.Errorf("count auth audits: %w", err))
 	}
 
-	listStmt := e.newAuditListStatement()
-	rows, err := sqlexec.ListTyped[normalizedAuditListInput, authAuditLogRow](ctx, e.core, listStmt, in, mapper.MustStructMapper[authAuditLogRow]())
+	listStmt, err := authAuditListStatement(e.core)
+	if err != nil {
+		return nil, httpx.NewError(500, "unknown", fmt.Errorf("prepare auth audit list statement: %w", err))
+	}
+	rows, err := sqlexec.List[authAuditLogRow](ctx, e.core, listStmt, params, mapper.MustStructMapper[authAuditLogRow]())
 	if err != nil {
 		return nil, httpx.NewError(500, "unknown", fmt.Errorf("query auth audits: %w", err))
 	}
@@ -109,87 +114,6 @@ func (e *AuthEndpoint) listAuditLogs(ctx context.Context, in normalizedAuditList
 			PageSize: in.PageSize,
 		},
 	}, nil
-}
-
-func (e *AuthEndpoint) buildAuditWhere(in normalizedAuditListInput) (string, []any) {
-	clauses := make([]string, 0, 6)
-	args := make([]any, 0, 6)
-	add := func(column string, op string, value any) {
-		args = append(args, value)
-		clauses = append(clauses, column+" "+op+" "+e.core.Dialect().BindVar(len(args)))
-	}
-
-	if in.Event != "" {
-		add("event", "=", in.Event)
-	}
-	if in.UserID != "" {
-		add("user_id", "=", in.UserID)
-	}
-	if in.Username != "" {
-		add("username", "LIKE", "%"+in.Username+"%")
-	}
-	if in.ClientIP != "" {
-		add("client_ip", "LIKE", "%"+in.ClientIP+"%")
-	}
-	if in.From > 0 {
-		add("created_at", ">=", in.From)
-	}
-	if in.To > 0 {
-		add("created_at", "<=", in.To)
-	}
-	if len(clauses) == 0 {
-		return "", args
-	}
-	return " WHERE " + strings.Join(clauses, " AND "), args
-}
-
-func (e *AuthEndpoint) newAuditCountStatement() sqlstmt.TypedSource[normalizedAuditListInput] {
-	return sqlstmt.For[normalizedAuditListInput](sqlstmt.New("auth_audit_count", func(params any) (sqlstmt.Bound, error) {
-		in, err := assertAuditParams(params)
-		if err != nil {
-			return sqlstmt.Bound{}, err
-		}
-		whereSQL, args := e.buildAuditWhere(in)
-		return sqlstmt.Bound{
-			Name: "auth_audit_count",
-			SQL:  "SELECT COUNT(1) FROM auth_audit_logs" + whereSQL,
-			Args: collectionlist.NewList(args...),
-		}, nil
-	}))
-}
-
-func (e *AuthEndpoint) newAuditListStatement() sqlstmt.TypedSource[normalizedAuditListInput] {
-	return sqlstmt.For[normalizedAuditListInput](sqlstmt.New("auth_audit_list", func(params any) (sqlstmt.Bound, error) {
-		in, err := assertAuditParams(params)
-		if err != nil {
-			return sqlstmt.Bound{}, err
-		}
-		whereSQL, args := e.buildAuditWhere(in)
-		limitBind := e.core.Dialect().BindVar(len(args) + 1)
-		offsetBind := e.core.Dialect().BindVar(len(args) + 2)
-		sql := `SELECT event, user_id, username, client_ip, success, reason, created_at
-		FROM auth_audit_logs` + whereSQL + ` ORDER BY created_at DESC LIMIT ` + limitBind + ` OFFSET ` + offsetBind
-		bindArgs := append(cloneAny(args), in.PageSize, (in.Page-1)*in.PageSize)
-		return sqlstmt.Bound{
-			Name: "auth_audit_list",
-			SQL:  sql,
-			Args: collectionlist.NewList(bindArgs...),
-		}, nil
-	}))
-}
-
-func assertAuditParams(params any) (normalizedAuditListInput, error) {
-	in, ok := params.(normalizedAuditListInput)
-	if !ok {
-		return normalizedAuditListInput{}, errors.New("invalid audit query params")
-	}
-	return in, nil
-}
-
-func cloneAny(xs []any) []any {
-	out := make([]any, len(xs))
-	copy(out, xs)
-	return out
 }
 
 func (e *AuthEndpoint) authorizeAndEnforce(ctx context.Context, authorization, action, resource string) (authx.Principal, error) {
