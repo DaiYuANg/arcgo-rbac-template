@@ -73,37 +73,17 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*JSONBody[D
 	}
 
 	out.StatCards = append(out.StatCards,
-		struct {
-			Key      string `json:"key"`
-			Value    int64  `json:"value"`
-			LabelKey string `json:"labelKey"`
-		}{Key: "totalUsers", Value: totalUsers, LabelKey: "dashboard.totalUsers"},
-		struct {
-			Key      string `json:"key"`
-			Value    int64  `json:"value"`
-			LabelKey string `json:"labelKey"`
-		}{Key: "totalRoles", Value: totalRoles, LabelKey: "dashboard.totalRoles"},
-		struct {
-			Key      string `json:"key"`
-			Value    int64  `json:"value"`
-			LabelKey string `json:"labelKey"`
-		}{Key: "totalPermissions", Value: totalPerms, LabelKey: "dashboard.totalPermissions"},
-		struct {
-			Key      string `json:"key"`
-			Value    int64  `json:"value"`
-			LabelKey string `json:"labelKey"`
-		}{Key: "totalPermissionGroups", Value: totalGroups, LabelKey: "dashboard.totalPermissionGroups"},
+		DashboardStatCard{Key: "totalUsers", Value: totalUsers, LabelKey: "dashboard.totalUsers"},
+		DashboardStatCard{Key: "totalRoles", Value: totalRoles, LabelKey: "dashboard.totalRoles"},
+		DashboardStatCard{Key: "totalPermissions", Value: totalPerms, LabelKey: "dashboard.totalPermissions"},
+		DashboardStatCard{Key: "totalPermissionGroups", Value: totalGroups, LabelKey: "dashboard.totalPermissionGroups"},
 	)
 
 	// User activity: last 6 months (placeholder).
 	now := time.Now().UTC()
 	for i := 5; i >= 0; i-- {
 		month := now.AddDate(0, -i, 0).Format("2006-01")
-		out.UserActivity = append(out.UserActivity, struct {
-			Month  string `json:"month"`
-			Users  int64  `json:"users"`
-			Logins int64  `json:"logins"`
-		}{Month: month, Users: totalUsers, Logins: 0})
+		out.UserActivity = append(out.UserActivity, DashboardUserActivityPoint{Month: month, Users: totalUsers, Logins: 0})
 	}
 
 	// Role distribution: count users per role (top 6).
@@ -111,11 +91,7 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*JSONBody[D
 	if err == nil {
 		colors := []string{"var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"}
 		roleRows.Range(func(i int, row dashboardRoleDistributionRow) bool {
-			out.RoleDistribution = append(out.RoleDistribution, struct {
-				Name  string `json:"name"`
-				Value int64  `json:"value"`
-				Color string `json:"color"`
-			}{
+			out.RoleDistribution = append(out.RoleDistribution, DashboardRoleDistributionItem{
 				Name:  row.Name,
 				Value: row.Value,
 				Color: colors[i%len(colors)],
@@ -128,41 +104,23 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*JSONBody[D
 	groupRows, err := e.listPermissionGroups(ctx)
 	if err == nil {
 		groupRows.Range(func(_ int, row dashboardPermissionGroupRow) bool {
-			out.PermissionGroups = append(out.PermissionGroups, struct {
-				Name  string `json:"name"`
-				Count int64  `json:"count"`
-			}{Name: row.Name, Count: row.Count})
+			out.PermissionGroups = append(out.PermissionGroups, DashboardPermissionGroupSummary(row))
 			return true
 		})
 	}
 
 	// Ensure non-nil slices for frontend.
 	if out.StatCards == nil {
-		out.StatCards = []struct {
-			Key      string `json:"key"`
-			Value    int64  `json:"value"`
-			LabelKey string `json:"labelKey"`
-		}{}
+		out.StatCards = []DashboardStatCard{}
 	}
 	if out.UserActivity == nil {
-		out.UserActivity = []struct {
-			Month  string `json:"month"`
-			Users  int64  `json:"users"`
-			Logins int64  `json:"logins"`
-		}{}
+		out.UserActivity = []DashboardUserActivityPoint{}
 	}
 	if out.RoleDistribution == nil {
-		out.RoleDistribution = []struct {
-			Name  string `json:"name"`
-			Value int64  `json:"value"`
-			Color string `json:"color"`
-		}{}
+		out.RoleDistribution = []DashboardRoleDistributionItem{}
 	}
 	if out.PermissionGroups == nil {
-		out.PermissionGroups = []struct {
-			Name  string `json:"name"`
-			Count int64  `json:"count"`
-		}{}
+		out.PermissionGroups = []DashboardPermissionGroupSummary{}
 	}
 
 	return wrapJSON(out), nil

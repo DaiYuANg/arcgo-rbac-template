@@ -110,26 +110,31 @@ func wrapJSON[T any](v *T) *JSONBody[T] {
 }
 
 type DashboardStatsResponse struct {
-	StatCards []struct {
-		Key      string `json:"key"`
-		Value    int64  `json:"value"`
-		LabelKey string `json:"labelKey"`
-	} `json:"statCards"`
+	StatCards        []DashboardStatCard               `json:"statCards"`
+	UserActivity     []DashboardUserActivityPoint      `json:"userActivity"`
+	RoleDistribution []DashboardRoleDistributionItem   `json:"roleDistribution"`
+	PermissionGroups []DashboardPermissionGroupSummary `json:"permissionGroups"`
+}
 
-	UserActivity []struct {
-		Month  string `json:"month"`
-		Users  int64  `json:"users"`
-		Logins int64  `json:"logins"`
-	} `json:"userActivity"`
+type DashboardStatCard struct {
+	Key      string `json:"key"`
+	Value    int64  `json:"value"`
+	LabelKey string `json:"labelKey"`
+}
 
-	RoleDistribution []struct {
-		Name  string `json:"name"`
-		Value int64  `json:"value"`
-		Color string `json:"color"`
-	} `json:"roleDistribution"`
+type DashboardUserActivityPoint struct {
+	Month  string `json:"month"`
+	Users  int64  `json:"users"`
+	Logins int64  `json:"logins"`
+}
 
-	PermissionGroups []struct {
-		Name  string `json:"name"`
-		Count int64  `json:"count"`
-	} `json:"permissionGroups"`
+type DashboardRoleDistributionItem struct {
+	Name  string `json:"name"`
+	Value int64  `json:"value"`
+	Color string `json:"color"`
+}
+
+type DashboardPermissionGroupSummary struct {
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
 }
