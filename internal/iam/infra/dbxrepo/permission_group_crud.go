@@ -7,7 +7,7 @@ import (
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 	"github.com/arcgolabs/dbx"
-	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/paging"
 	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/dbx/repository"
 )
@@ -78,55 +78,45 @@ func (r *PermissionGroupRepo) Get(ctx context.Context, groupID domain.Permission
 func (r *PermissionGroupRepo) List(ctx context.Context, q domain.PermissionGroupsListQuery) (domain.Page[domain.PermissionGroup], error) {
 	where := predicatesAnd(permissionGroupListPredicates(q))
 
-	countQuery := querydsl.
-		Select(querydsl.CountAll().As("total")).
-		From(PermissionGroups)
-	if where != nil {
-		countQuery = countQuery.Where(where)
-	}
-	total, err := countTotal(ctx, r.core, countQuery)
-	if err != nil {
-		return domain.Page[domain.PermissionGroup]{}, fmt.Errorf("permission group list count: %w", err)
-	}
-
 	desc := q.Order == domain.SortDesc
 	ord, oerr := listOrderBy(q.Sort, desc, permissionGroupListOrders)
 	if oerr != nil {
 		return domain.Page[domain.PermissionGroup]{}, fmt.Errorf("permission group list: %w", oerr)
 	}
-
-	type row struct {
-		ID          string `dbx:"id"`
-		Name        string `dbx:"name"`
-		Description string `dbx:"description"`
-		CreatedAt   int64  `dbx:"created_at"`
-	}
-	listQuery := querydsl.
-		Select(PermissionGroups.ID, PermissionGroups.Name, PermissionGroups.Description, PermissionGroups.CreatedAt).
-		From(PermissionGroups).
-		PageBy(int(q.Page), int(q.PageSize)).
-		OrderBy(ord)
+	specs := []repository.Spec{repository.OrderBy(ord)}
 	if where != nil {
-		listQuery = listQuery.Where(where)
+		specs = append(specs, repository.Where(where))
 	}
-
-	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
+	pageResult, err := r.repo.ListPageSpecRequest(
+		ctx,
+		paging.Request{Page: int(q.Page), PageSize: int(q.PageSize)},
+		specs...,
+	)
 	if err != nil {
 		return domain.Page[domain.PermissionGroup]{}, fmt.Errorf("permission group list: %w", err)
 	}
-	out := make([]domain.PermissionGroup, 0, items.Len())
-	if items != nil {
-		items.Range(func(_ int, r row) bool {
+	size := 0
+	if pageResult.Items != nil {
+		size = pageResult.Items.Len()
+	}
+	out := make([]domain.PermissionGroup, 0, size)
+	if pageResult.Items != nil {
+		pageResult.Items.Range(func(_ int, ent PermissionGroup) bool {
 			out = append(out, domain.PermissionGroup{
-				ID:          domain.PermissionGroupID(r.ID),
-				Name:        r.Name,
-				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
+				ID:          domain.PermissionGroupID(ent.ID),
+				Name:        ent.Name,
+				Description: ent.Description,
+				CreatedAt:   ent.CreatedAt,
 			})
 			return true
 		})
 	}
-	return domain.Page[domain.PermissionGroup]{Items: out, Total: total, Page: q.Page, PageSize: q.PageSize}, nil
+	return domain.Page[domain.PermissionGroup]{
+		Items:    out,
+		Total:    pageResult.Total,
+		Page:     int64(pageResult.Page),
+		PageSize: int64(pageResult.PageSize),
+	}, nil
 }
 
 func (r *PermissionGroupRepo) Create(ctx context.Context, g domain.PermissionGroup) (domain.PermissionGroup, error) {

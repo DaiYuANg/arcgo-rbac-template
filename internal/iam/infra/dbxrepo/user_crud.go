@@ -7,7 +7,7 @@ import (
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 	"github.com/arcgolabs/dbx"
-	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/paging"
 	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/dbx/repository"
 )
@@ -87,55 +87,45 @@ func (r *UserRepo) Get(ctx context.Context, userID domain.UserID) (domain.User, 
 func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Page[domain.User], error) {
 	where := predicatesAnd(usersListPredicates(q))
 
-	countQuery := querydsl.
-		Select(querydsl.CountAll().As("total")).
-		From(Users)
-	if where != nil {
-		countQuery = countQuery.Where(where)
-	}
-	total, err := countTotal(ctx, r.core, countQuery)
-	if err != nil {
-		return domain.Page[domain.User]{}, fmt.Errorf("user list count: %w", err)
-	}
-
 	desc := q.Order == domain.SortDesc
 	ord, oerr := listOrderBy(q.Sort, desc, userListOrders)
 	if oerr != nil {
 		return domain.Page[domain.User]{}, fmt.Errorf("user list: %w", oerr)
 	}
-
-	type row struct {
-		ID        string `dbx:"id"`
-		Email     string `dbx:"email"`
-		Name      string `dbx:"name"`
-		CreatedAt int64  `dbx:"created_at"`
-	}
-	listQuery := querydsl.
-		Select(Users.ID, Users.Email, Users.Name, Users.CreatedAt).
-		From(Users).
-		PageBy(int(q.Page), int(q.PageSize)).
-		OrderBy(ord)
+	specs := []repository.Spec{repository.OrderBy(ord)}
 	if where != nil {
-		listQuery = listQuery.Where(where)
+		specs = append(specs, repository.Where(where))
 	}
-
-	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
+	pageResult, err := r.repo.ListPageSpecRequest(
+		ctx,
+		paging.Request{Page: int(q.Page), PageSize: int(q.PageSize)},
+		specs...,
+	)
 	if err != nil {
 		return domain.Page[domain.User]{}, fmt.Errorf("user list: %w", err)
 	}
-	out := make([]domain.User, 0, items.Len())
-	if items != nil {
-		items.Range(func(_ int, r row) bool {
+	size := 0
+	if pageResult.Items != nil {
+		size = pageResult.Items.Len()
+	}
+	out := make([]domain.User, 0, size)
+	if pageResult.Items != nil {
+		pageResult.Items.Range(func(_ int, ent User) bool {
 			out = append(out, domain.User{
-				ID:        domain.UserID(r.ID),
-				Email:     r.Email,
-				Name:      r.Name,
-				CreatedAt: r.CreatedAt,
+				ID:        domain.UserID(ent.ID),
+				Email:     ent.Email,
+				Name:      ent.Name,
+				CreatedAt: ent.CreatedAt,
 			})
 			return true
 		})
 	}
-	return domain.Page[domain.User]{Items: out, Total: total, Page: q.Page, PageSize: q.PageSize}, nil
+	return domain.Page[domain.User]{
+		Items:    out,
+		Total:    pageResult.Total,
+		Page:     int64(pageResult.Page),
+		PageSize: int64(pageResult.PageSize),
+	}, nil
 }
 
 func (r *UserRepo) Create(ctx context.Context, u domain.User) (domain.User, error) {
@@ -191,22 +181,27 @@ func (r *UserRepo) ReplaceRoles(ctx context.Context, userID domain.UserID, roleI
 	if roleIDs == nil {
 		return nil
 	}
-	if _, err := dbx.Exec(ctx, r.core, querydsl.DeleteFrom(UserRoles).Where(UserRoles.UserID.Eq(id))); err != nil {
-		return fmt.Errorf("user replace roles delete: %w", err)
-	}
-	for _, rid := range roleIDs {
-		v := strings.TrimSpace(string(rid))
-		if v == "" {
-			continue
+	if err := inTx(ctx, r.core, func(tx *dbx.Tx) error {
+		if _, err := dbx.Exec(ctx, tx, querydsl.DeleteFrom(UserRoles).Where(UserRoles.UserID.Eq(id))); err != nil {
+			return fmt.Errorf("user replace roles delete: %w", err)
 		}
-		ins := querydsl.
-			InsertInto(UserRoles).
-			Values(UserRoles.UserID.Set(id), UserRoles.RoleID.Set(v)).
-			OnConflict(UserRoles.UserID, UserRoles.RoleID).
-			DoNothing()
-		if _, err := dbx.Exec(ctx, r.core, ins); err != nil {
-			return fmt.Errorf("user replace roles insert: %w", err)
+		for _, rid := range roleIDs {
+			v := strings.TrimSpace(string(rid))
+			if v == "" {
+				continue
+			}
+			ins := querydsl.
+				InsertInto(UserRoles).
+				Values(UserRoles.UserID.Set(id), UserRoles.RoleID.Set(v)).
+				OnConflict(UserRoles.UserID, UserRoles.RoleID).
+				DoNothing()
+			if _, err := dbx.Exec(ctx, tx, ins); err != nil {
+				return fmt.Errorf("user replace roles insert: %w", err)
+			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }

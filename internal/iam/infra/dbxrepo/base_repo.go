@@ -3,6 +3,7 @@ package dbxrepo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -38,6 +39,32 @@ func ensureStringID[E any, S repository.EntitySchema[E]](
 	}
 	if err := repo.Upsert(ctx, mk(id), "id"); err != nil {
 		return fmt.Errorf("%s upsert: %w", kind, err)
+	}
+	return nil
+}
+
+func inTx(ctx context.Context, core *dbx.DB, fn func(tx *dbx.Tx) error) (err error) {
+	if core == nil {
+		return dbx.ErrNilDB
+	}
+	tx, err := core.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		if rollbackErr := tx.RollbackContext(ctx); rollbackErr != nil {
+			err = errors.Join(err, fmt.Errorf("rollback tx: %w", rollbackErr))
+		}
+	}()
+
+	if err = fn(tx); err != nil {
+		return err
+	}
+	if err = tx.CommitContext(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
 	}
 	return nil
 }

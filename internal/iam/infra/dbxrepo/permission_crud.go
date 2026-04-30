@@ -9,6 +9,7 @@ import (
 	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dbx/column"
 	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/paging"
 	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/dbx/repository"
 )
@@ -95,55 +96,45 @@ func permissionListPredicates(q domain.PermissionsListQuery) []querydsl.Predicat
 func (r *PermissionRepo) List(ctx context.Context, q domain.PermissionsListQuery) (domain.Page[domain.Permission], error) {
 	where := predicatesAnd(permissionListPredicates(q))
 
-	countQuery := querydsl.
-		Select(querydsl.CountAll().As("total")).
-		From(Permissions)
-	if where != nil {
-		countQuery = countQuery.Where(where)
-	}
-	total, err := countTotal(ctx, r.core, countQuery)
-	if err != nil {
-		return domain.Page[domain.Permission]{}, fmt.Errorf("permission list count: %w", err)
-	}
-
 	desc := q.Order == domain.SortDesc
 	ord, oerr := listOrderBy(q.Sort, desc, permissionListOrders)
 	if oerr != nil {
 		return domain.Page[domain.Permission]{}, fmt.Errorf("permission list: %w", oerr)
 	}
-
-	type row struct {
-		ID        string `dbx:"id"`
-		Name      string `dbx:"name"`
-		Code      string `dbx:"code"`
-		CreatedAt int64  `dbx:"created_at"`
-	}
-	listQuery := querydsl.
-		Select(Permissions.ID, Permissions.Name, Permissions.Code, Permissions.CreatedAt).
-		From(Permissions).
-		PageBy(int(q.Page), int(q.PageSize)).
-		OrderBy(ord)
+	specs := []repository.Spec{repository.OrderBy(ord)}
 	if where != nil {
-		listQuery = listQuery.Where(where)
+		specs = append(specs, repository.Where(where))
 	}
-
-	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
+	pageResult, err := r.repo.ListPageSpecRequest(
+		ctx,
+		paging.Request{Page: int(q.Page), PageSize: int(q.PageSize)},
+		specs...,
+	)
 	if err != nil {
 		return domain.Page[domain.Permission]{}, fmt.Errorf("permission list: %w", err)
 	}
-	out := make([]domain.Permission, 0, items.Len())
-	if items != nil {
-		items.Range(func(_ int, r row) bool {
+	size := 0
+	if pageResult.Items != nil {
+		size = pageResult.Items.Len()
+	}
+	out := make([]domain.Permission, 0, size)
+	if pageResult.Items != nil {
+		pageResult.Items.Range(func(_ int, ent Permission) bool {
 			out = append(out, domain.Permission{
-				ID:        domain.PermissionID(r.ID),
-				Name:      r.Name,
-				Code:      r.Code,
-				CreatedAt: r.CreatedAt,
+				ID:        domain.PermissionID(ent.ID),
+				Name:      ent.Name,
+				Code:      ent.Code,
+				CreatedAt: ent.CreatedAt,
 			})
 			return true
 		})
 	}
-	return domain.Page[domain.Permission]{Items: out, Total: total, Page: q.Page, PageSize: q.PageSize}, nil
+	return domain.Page[domain.Permission]{
+		Items:    out,
+		Total:    pageResult.Total,
+		Page:     int64(pageResult.Page),
+		PageSize: int64(pageResult.PageSize),
+	}, nil
 }
 
 func (r *PermissionRepo) Create(ctx context.Context, p domain.Permission) (domain.Permission, error) {
@@ -224,23 +215,25 @@ func (r *PermissionRepo) ReplaceGroup(ctx context.Context, permID domain.Permiss
 	if id == "" {
 		return nil
 	}
-	if _, err := dbx.Exec(ctx, r.core, querydsl.DeleteFrom(PermissionGroupPermissions).Where(PermissionGroupPermissions.PermID.Eq(id))); err != nil {
-		return fmt.Errorf("permission replace group delete: %w", err)
-	}
-	if groupID == nil {
+	return inTx(ctx, r.core, func(tx *dbx.Tx) error {
+		if _, err := dbx.Exec(ctx, tx, querydsl.DeleteFrom(PermissionGroupPermissions).Where(PermissionGroupPermissions.PermID.Eq(id))); err != nil {
+			return fmt.Errorf("permission replace group delete: %w", err)
+		}
+		if groupID == nil {
+			return nil
+		}
+		gid := strings.TrimSpace(string(*groupID))
+		if gid == "" {
+			return nil
+		}
+		ins := querydsl.
+			InsertInto(PermissionGroupPermissions).
+			Values(PermissionGroupPermissions.GroupID.Set(gid), PermissionGroupPermissions.PermID.Set(id)).
+			OnConflict(PermissionGroupPermissions.GroupID, PermissionGroupPermissions.PermID).
+			DoNothing()
+		if _, err := dbx.Exec(ctx, tx, ins); err != nil {
+			return fmt.Errorf("permission replace group insert: %w", err)
+		}
 		return nil
-	}
-	gid := strings.TrimSpace(string(*groupID))
-	if gid == "" {
-		return nil
-	}
-	ins := querydsl.
-		InsertInto(PermissionGroupPermissions).
-		Values(PermissionGroupPermissions.GroupID.Set(gid), PermissionGroupPermissions.PermID.Set(id)).
-		OnConflict(PermissionGroupPermissions.GroupID, PermissionGroupPermissions.PermID).
-		DoNothing()
-	if _, err := dbx.Exec(ctx, r.core, ins); err != nil {
-		return fmt.Errorf("permission replace group insert: %w", err)
-	}
-	return nil
+	})
 }

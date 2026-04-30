@@ -2,15 +2,17 @@ package authn
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/config"
 	"github.com/arcgolabs/authx"
-	"github.com/arcgolabs/collectionx"
+	"github.com/arcgolabs/collectionx/list"
 	"github.com/arcgolabs/dbx"
+	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/sqlexec"
+	"github.com/arcgolabs/dbx/sqlstmt"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -41,7 +43,7 @@ func authenticateRoot(cfg config.Config, sources map[string]bool, username, pass
 	return authx.AuthenticationResult{
 		Principal: authx.Principal{
 			ID:    username,
-			Roles: collectionx.NewList[string]("admin"),
+			Roles: list.NewList[string]("admin"),
 		},
 	}, true
 }
@@ -97,24 +99,29 @@ func checkDBUser(ctx context.Context, core *dbx.DB, username, password string) (
 	if core == nil || core.SQLDB() == nil || core.Dialect() == nil {
 		return authx.Principal{}, false, errors.New("db core not ready")
 	}
-	bind := core.Dialect().BindVar(1)
-	q := `SELECT password_hash, roles FROM auth_users WHERE username = ` + bind
-	row := core.SQLDB().QueryRowContext(ctx, q, username)
-	var hash string
-	var roles string
-	if err := row.Scan(&hash, &roles); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return authx.Principal{}, false, nil
-		}
-		return authx.Principal{}, false, fmt.Errorf("scan auth_users: %w", err)
+
+	stmt := authUserByUsernameStatement(core)
+	result, err := sqlexec.FindTyped[authUserByUsernameParams, authUserByUsernameRow](
+		ctx,
+		core,
+		stmt,
+		authUserByUsernameParams{Username: username},
+		mapper.MustStructMapper[authUserByUsernameRow](),
+	)
+	if err != nil {
+		return authx.Principal{}, false, fmt.Errorf("query auth_users: %w", err)
+	}
+	userRow, ok := result.Get()
+	if !ok {
+		return authx.Principal{}, false, nil
 	}
 
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+	if bcrypt.CompareHashAndPassword([]byte(userRow.PasswordHash), []byte(password)) != nil {
 		return authx.Principal{}, false, authx.ErrUnauthenticated
 	}
 
-	roleList := collectionx.NewList[string]()
-	for part := range strings.SplitSeq(roles, ",") {
+	roleList := list.NewList[string]()
+	for part := range strings.SplitSeq(userRow.Roles, ",") {
 		r := strings.TrimSpace(part)
 		if r != "" {
 			roleList.Add(r)
@@ -125,4 +132,28 @@ func checkDBUser(ctx context.Context, core *dbx.DB, username, password string) (
 		ID:    username,
 		Roles: roleList,
 	}, true, nil
+}
+
+type authUserByUsernameParams struct {
+	Username string
+}
+
+type authUserByUsernameRow struct {
+	PasswordHash string `dbx:"password_hash"`
+	Roles        string `dbx:"roles"`
+}
+
+func authUserByUsernameStatement(core *dbx.DB) sqlstmt.TypedSource[authUserByUsernameParams] {
+	return sqlstmt.For[authUserByUsernameParams](sqlstmt.New("auth_user_by_username", func(params any) (sqlstmt.Bound, error) {
+		p, ok := params.(authUserByUsernameParams)
+		if !ok {
+			return sqlstmt.Bound{}, errors.New("invalid auth user params")
+		}
+		bind := core.Dialect().BindVar(1)
+		return sqlstmt.Bound{
+			Name: "auth_user_by_username",
+			SQL:  `SELECT password_hash, roles FROM auth_users WHERE username = ` + bind + ` LIMIT 1`,
+			Args: list.NewList[any](p.Username),
+		}, nil
+	}))
 }

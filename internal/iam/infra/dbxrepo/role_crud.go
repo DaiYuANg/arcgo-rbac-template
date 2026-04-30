@@ -7,7 +7,7 @@ import (
 
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 	"github.com/arcgolabs/dbx"
-	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/paging"
 	"github.com/arcgolabs/dbx/querydsl"
 	"github.com/arcgolabs/dbx/repository"
 )
@@ -78,55 +78,45 @@ func (r *RoleRepo) Get(ctx context.Context, roleID domain.RoleID) (domain.Role, 
 func (r *RoleRepo) List(ctx context.Context, q domain.RolesListQuery) (domain.Page[domain.Role], error) {
 	where := predicatesAnd(rolesListPredicates(q))
 
-	countQuery := querydsl.
-		Select(querydsl.CountAll().As("total")).
-		From(Roles)
-	if where != nil {
-		countQuery = countQuery.Where(where)
-	}
-	total, err := countTotal(ctx, r.core, countQuery)
-	if err != nil {
-		return domain.Page[domain.Role]{}, fmt.Errorf("role list count: %w", err)
-	}
-
 	desc := q.Order == domain.SortDesc
 	ord, oerr := listOrderBy(q.Sort, desc, roleListOrders)
 	if oerr != nil {
 		return domain.Page[domain.Role]{}, fmt.Errorf("role list: %w", oerr)
 	}
-
-	type row struct {
-		ID          string `dbx:"id"`
-		Name        string `dbx:"name"`
-		Description string `dbx:"description"`
-		CreatedAt   int64  `dbx:"created_at"`
-	}
-	listQuery := querydsl.
-		Select(Roles.ID, Roles.Name, Roles.Description, Roles.CreatedAt).
-		From(Roles).
-		PageBy(int(q.Page), int(q.PageSize)).
-		OrderBy(ord)
+	specs := []repository.Spec{repository.OrderBy(ord)}
 	if where != nil {
-		listQuery = listQuery.Where(where)
+		specs = append(specs, repository.Where(where))
 	}
-
-	items, err := dbx.QueryAll(ctx, r.core, listQuery, mapper.MustStructMapper[row]())
+	pageResult, err := r.repo.ListPageSpecRequest(
+		ctx,
+		paging.Request{Page: int(q.Page), PageSize: int(q.PageSize)},
+		specs...,
+	)
 	if err != nil {
 		return domain.Page[domain.Role]{}, fmt.Errorf("role list: %w", err)
 	}
-	out := make([]domain.Role, 0, items.Len())
-	if items != nil {
-		items.Range(func(_ int, r row) bool {
+	size := 0
+	if pageResult.Items != nil {
+		size = pageResult.Items.Len()
+	}
+	out := make([]domain.Role, 0, size)
+	if pageResult.Items != nil {
+		pageResult.Items.Range(func(_ int, ent Role) bool {
 			out = append(out, domain.Role{
-				ID:          domain.RoleID(r.ID),
-				Name:        r.Name,
-				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
+				ID:          domain.RoleID(ent.ID),
+				Name:        ent.Name,
+				Description: ent.Description,
+				CreatedAt:   ent.CreatedAt,
 			})
 			return true
 		})
 	}
-	return domain.Page[domain.Role]{Items: out, Total: total, Page: q.Page, PageSize: q.PageSize}, nil
+	return domain.Page[domain.Role]{
+		Items:    out,
+		Total:    pageResult.Total,
+		Page:     int64(pageResult.Page),
+		PageSize: int64(pageResult.PageSize),
+	}, nil
 }
 
 func (r *RoleRepo) Create(ctx context.Context, rr domain.Role) (domain.Role, error) {
@@ -204,22 +194,27 @@ func (r *RoleRepo) ReplacePermissionGroups(ctx context.Context, roleID domain.Ro
 	if groupIDs == nil {
 		return nil
 	}
-	if _, err := dbx.Exec(ctx, r.core, querydsl.DeleteFrom(RolePermissionGroups).Where(RolePermissionGroups.RoleID.Eq(id))); err != nil {
-		return fmt.Errorf("role replace groups delete: %w", err)
-	}
-	for _, gid := range groupIDs {
-		v := strings.TrimSpace(string(gid))
-		if v == "" {
-			continue
+	if err := inTx(ctx, r.core, func(tx *dbx.Tx) error {
+		if _, err := dbx.Exec(ctx, tx, querydsl.DeleteFrom(RolePermissionGroups).Where(RolePermissionGroups.RoleID.Eq(id))); err != nil {
+			return fmt.Errorf("role replace groups delete: %w", err)
 		}
-		ins := querydsl.
-			InsertInto(RolePermissionGroups).
-			Values(RolePermissionGroups.RoleID.Set(id), RolePermissionGroups.GroupID.Set(v)).
-			OnConflict(RolePermissionGroups.RoleID, RolePermissionGroups.GroupID).
-			DoNothing()
-		if _, err := dbx.Exec(ctx, r.core, ins); err != nil {
-			return fmt.Errorf("role replace groups insert: %w", err)
+		for _, gid := range groupIDs {
+			v := strings.TrimSpace(string(gid))
+			if v == "" {
+				continue
+			}
+			ins := querydsl.
+				InsertInto(RolePermissionGroups).
+				Values(RolePermissionGroups.RoleID.Set(id), RolePermissionGroups.GroupID.Set(v)).
+				OnConflict(RolePermissionGroups.RoleID, RolePermissionGroups.GroupID).
+				DoNothing()
+			if _, err := dbx.Exec(ctx, tx, ins); err != nil {
+				return fmt.Errorf("role replace groups insert: %w", err)
+			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }
