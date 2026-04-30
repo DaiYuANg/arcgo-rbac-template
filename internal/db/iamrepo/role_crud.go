@@ -79,18 +79,14 @@ func (r *RoleRepo) List(ctx context.Context, q domain.RolesListQuery) (domain.Pa
 	if err != nil {
 		return domain.Page[domain.Role]{}, fmt.Errorf("role list: %w", err)
 	}
-	size := 0
-	if pageResult.Items != nil {
-		size = pageResult.Items.Len()
-	}
-	out := make([]domain.Role, 0, size)
-	if pageResult.Items != nil {
-		pageResult.Items.Range(func(_ int, ent Role) bool {
-			out = append(out, domain.Role{ID: domain.RoleID(ent.ID), Name: ent.Name, Description: ent.Description, CreatedAt: ent.CreatedAt})
-			return true
-		})
-	}
-	return domain.Page[domain.Role]{Items: out, Total: pageResult.Total, Page: int64(pageResult.Page), PageSize: int64(pageResult.PageSize)}, nil
+	return toDomainPage[Role, domain.Role](pageResult, func(ent Role) domain.Role {
+		return domain.Role{
+			ID:          domain.RoleID(ent.ID),
+			Name:        ent.Name,
+			Description: ent.Description,
+			CreatedAt:   ent.CreatedAt,
+		}
+	}), nil
 }
 
 func (r *RoleRepo) Create(ctx context.Context, rr domain.Role) (domain.Role, error) {

@@ -95,18 +95,14 @@ func (r *PermissionRepo) List(ctx context.Context, q domain.PermissionsListQuery
 	if err != nil {
 		return domain.Page[domain.Permission]{}, fmt.Errorf("permission list: %w", err)
 	}
-	size := 0
-	if pageResult.Items != nil {
-		size = pageResult.Items.Len()
-	}
-	out := make([]domain.Permission, 0, size)
-	if pageResult.Items != nil {
-		pageResult.Items.Range(func(_ int, ent Permission) bool {
-			out = append(out, domain.Permission{ID: domain.PermissionID(ent.ID), Name: ent.Name, Code: ent.Code, CreatedAt: ent.CreatedAt})
-			return true
-		})
-	}
-	return domain.Page[domain.Permission]{Items: out, Total: pageResult.Total, Page: int64(pageResult.Page), PageSize: int64(pageResult.PageSize)}, nil
+	return toDomainPage[Permission, domain.Permission](pageResult, func(ent Permission) domain.Permission {
+		return domain.Permission{
+			ID:        domain.PermissionID(ent.ID),
+			Name:      ent.Name,
+			Code:      ent.Code,
+			CreatedAt: ent.CreatedAt,
+		}
+	}), nil
 }
 
 func (r *PermissionRepo) Create(ctx context.Context, p domain.Permission) (domain.Permission, error) {

@@ -88,18 +88,14 @@ func (r *UserRepo) List(ctx context.Context, q domain.UsersListQuery) (domain.Pa
 	if err != nil {
 		return domain.Page[domain.User]{}, fmt.Errorf("user list: %w", err)
 	}
-	size := 0
-	if pageResult.Items != nil {
-		size = pageResult.Items.Len()
-	}
-	out := make([]domain.User, 0, size)
-	if pageResult.Items != nil {
-		pageResult.Items.Range(func(_ int, ent User) bool {
-			out = append(out, domain.User{ID: domain.UserID(ent.ID), Email: ent.Email, Name: ent.Name, CreatedAt: ent.CreatedAt})
-			return true
-		})
-	}
-	return domain.Page[domain.User]{Items: out, Total: pageResult.Total, Page: int64(pageResult.Page), PageSize: int64(pageResult.PageSize)}, nil
+	return toDomainPage[User, domain.User](pageResult, func(ent User) domain.User {
+		return domain.User{
+			ID:        domain.UserID(ent.ID),
+			Email:     ent.Email,
+			Name:      ent.Name,
+			CreatedAt: ent.CreatedAt,
+		}
+	}), nil
 }
 
 func (r *UserRepo) Create(ctx context.Context, u domain.User) (domain.User, error) {

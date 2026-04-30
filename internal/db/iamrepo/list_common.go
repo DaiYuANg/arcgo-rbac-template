@@ -8,6 +8,7 @@ import (
 	"github.com/arcgolabs/arcgo-rbac-template/internal/iam/domain"
 	"github.com/arcgolabs/dbx"
 	"github.com/arcgolabs/dbx/mapper"
+	"github.com/arcgolabs/dbx/paging"
 	"github.com/arcgolabs/dbx/querydsl"
 )
 
@@ -35,4 +36,27 @@ func queryOne[Row any](ctx context.Context, core *dbx.DB, q querydsl.Builder, wr
 	}
 	row, _ := items.Get(0)
 	return row, nil
+}
+
+func toDomainPage[E any, R any](result paging.Result[E], mapItem func(E) R) domain.Page[R] {
+	mapped := paging.MapResult[E, R](result, func(_ int, item E) R {
+		return mapItem(item)
+	})
+	size := 0
+	if mapped.Items != nil {
+		size = mapped.Items.Len()
+	}
+	items := make([]R, 0, size)
+	if mapped.Items != nil {
+		mapped.Items.Range(func(_ int, item R) bool {
+			items = append(items, item)
+			return true
+		})
+	}
+	return domain.Page[R]{
+		Items:    items,
+		Total:    mapped.Total,
+		Page:     int64(mapped.Page),
+		PageSize: int64(mapped.PageSize),
+	}
 }
