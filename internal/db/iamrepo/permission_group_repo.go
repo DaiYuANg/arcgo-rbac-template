@@ -14,7 +14,7 @@ type PermissionGroupRepo struct {
 }
 
 func NewPermissionGroupRepo(core *dbx.DB) *PermissionGroupRepo {
-	return &PermissionGroupRepo{baseRepo: newBaseRepo[PermissionGroup](core, PermissionGroups)}
+	return &PermissionGroupRepo{baseRepo: newBaseRepo[PermissionGroup, PermissionGroupSchema](core, PermissionGroups)}
 }
 
 func (r *PermissionGroupRepo) Ensure(ctx context.Context, groupID domain.PermissionGroupID) error {

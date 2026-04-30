@@ -26,7 +26,7 @@ func listOrderBy(sortKey string, desc bool, orders map[string]func(bool) queryds
 
 func queryOne[Row any](ctx context.Context, core *dbx.DB, q querydsl.Builder, wrap string) (Row, error) {
 	var zero Row
-	items, err := dbx.QueryAll(ctx, core, q, mapper.MustStructMapper[Row]())
+	items, err := dbx.QueryAll[Row](ctx, core, q, mapper.MustStructMapper[Row]())
 	if err != nil {
 		return zero, fmt.Errorf("%s: %w", wrap, err)
 	}

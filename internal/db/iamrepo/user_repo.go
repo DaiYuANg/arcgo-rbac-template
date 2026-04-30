@@ -15,7 +15,7 @@ type UserRepo struct {
 
 func NewUserRepo(core *dbx.DB) *UserRepo {
 	return &UserRepo{
-		baseRepo: newBaseRepo[User](core, Users),
+		baseRepo: newBaseRepo[User, UserSchema](core, Users),
 	}
 }
 

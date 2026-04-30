@@ -14,7 +14,7 @@ type RoleRepo struct {
 }
 
 func NewRoleRepo(core *dbx.DB) *RoleRepo {
-	return &RoleRepo{baseRepo: newBaseRepo[Role](core, Roles)}
+	return &RoleRepo{baseRepo: newBaseRepo[Role, RoleSchema](core, Roles)}
 }
 
 func (r *RoleRepo) Ensure(ctx context.Context, roleID domain.RoleID) error {

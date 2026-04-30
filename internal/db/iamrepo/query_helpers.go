@@ -25,7 +25,7 @@ func queryStringColumn(ctx context.Context, core *dbx.DB, query querydsl.Builder
 	if core == nil {
 		return nil, dbx.ErrNilDB
 	}
-	items, err := dbx.QueryAll(ctx, core, query, mapper.MustStructMapper[oneStringRow]())
+	items, err := dbx.QueryAll[oneStringRow](ctx, core, query, mapper.MustStructMapper[oneStringRow]())
 	if err != nil {
 		return nil, fmt.Errorf("db query all: %w", err)
 	}

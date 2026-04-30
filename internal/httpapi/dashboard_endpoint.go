@@ -170,7 +170,7 @@ func (e *DashboardEndpoint) Stats(ctx context.Context, _ *struct{}) (*JSONBody[D
 
 func (e *DashboardEndpoint) countTable(ctx context.Context, source querydsl.TableSource) (int64, error) {
 	q := querydsl.Select(querydsl.CountAll().As("total")).From(source)
-	items, err := dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardCountRow]())
+	items, err := dbx.QueryAll[dashboardCountRow](ctx, e.core, q, mapper.MustStructMapper[dashboardCountRow]())
 	if err != nil {
 		return 0, fmt.Errorf("dashboard count query: %w", err)
 	}
@@ -193,7 +193,7 @@ func (e *DashboardEndpoint) listRoleDistribution(ctx context.Context) (*collecti
 		GroupBy(iamrepo.Roles.ID, iamrepo.Roles.Name).
 		OrderBy(userCount.Desc()).
 		Limit(6)
-	items, err := dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardRoleDistributionRow]())
+	items, err := dbx.QueryAll[dashboardRoleDistributionRow](ctx, e.core, q, mapper.MustStructMapper[dashboardRoleDistributionRow]())
 	if err != nil {
 		return nil, fmt.Errorf("dashboard role distribution query: %w", err)
 	}
@@ -213,7 +213,7 @@ func (e *DashboardEndpoint) listPermissionGroups(ctx context.Context) (*collecti
 	).
 		GroupBy(iamrepo.PermissionGroups.ID, iamrepo.PermissionGroups.Name).
 		OrderBy(permCount.Desc(), iamrepo.PermissionGroups.Name.Asc())
-	items, err := dbx.QueryAll(ctx, e.core, q, mapper.MustStructMapper[dashboardPermissionGroupRow]())
+	items, err := dbx.QueryAll[dashboardPermissionGroupRow](ctx, e.core, q, mapper.MustStructMapper[dashboardPermissionGroupRow]())
 	if err != nil {
 		return nil, fmt.Errorf("dashboard permission group query: %w", err)
 	}

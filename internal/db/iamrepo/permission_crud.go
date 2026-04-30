@@ -152,7 +152,7 @@ func (r *PermissionRepo) GetGroupID(ctx context.Context, permID domain.Permissio
 		GroupID string `dbx:"group_id"`
 	}
 	q := querydsl.Select(PermissionGroupPermissions.GroupID.As("group_id")).From(PermissionGroupPermissions).Where(PermissionGroupPermissions.PermID.Eq(id)).Limit(1)
-	items, err := dbx.QueryAll(ctx, r.core, q, mapper.MustStructMapper[row]())
+	items, err := dbx.QueryAll[row](ctx, r.core, q, mapper.MustStructMapper[row]())
 	if err != nil {
 		return "", false, fmt.Errorf("permission get group: %w", err)
 	}
